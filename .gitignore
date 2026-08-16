@@ -1,0 +1,33 @@
+# Secrets — never commit real Jellyfin credentials or app secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Test / tooling output
+coverage/
+playwright-report/
+test-results/
+.vite/
+
+# Local data volumes
+data/
+postgres-data/
+redis-data/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
