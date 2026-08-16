@@ -31,3 +31,6 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# SDD workspace (git-ignored scratch)
+.superpowers/
