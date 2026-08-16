@@ -243,6 +243,45 @@ need neither direct Jellyfin network access nor a second auth context.
 Chart palette and chart-form selection follow the `dataviz` skill so both themes stay
 readable, rather than accepting Recharts defaults.
 
+### Component architecture
+
+Components are built to be reused across routes, in three layers with a strict dependency
+direction — each layer may import from the one above it, never below.
+
+1. **`components/ui/`** — shadcn/ui primitives (Button, Card, Table, Dialog, Badge, Skeleton).
+   Generic, no knowledge of this app's domain.
+2. **`components/domain/`** — presentational, domain-aware, **props-in only**. No hooks that
+   fetch, no route awareness, no access to router params. `StatCard`, `StatCardRow`,
+   `WatchTimeChart`, `TopContentList`, `ActiveStreamCard`, `PlaybackHistoryTable`,
+   `UserAvatar`, `PosterImage`, `EmptyState`.
+3. **`routes/`** — containers. These own the TanStack Query calls and route params, and pass
+   plain data down. They hold no presentation logic beyond layout.
+
+Because layer 2 never fetches, the same component genuinely serves several screens rather
+than being copied:
+
+| Component | Used by |
+|---|---|
+| `StatCardRow` | Overview, user detail, library detail |
+| `TopContentList` | Overview, user detail, library detail |
+| `WatchTimeChart` | Overview, user detail, library detail |
+| `PlaybackHistoryTable` | `/history`, user detail, library detail |
+| `ActiveStreamCard` | Overview (compact), `/live` (full) |
+
+**The anti-pattern to avoid:** route-specific branching inside a shared component
+(`if (context === "userPage")`). Variation is expressed through props and composition —
+a `variant` prop for genuinely presentational differences like compact vs full, and
+children/slots for structural differences. If a component starts needing to know which page
+it is on, that is the signal to split it.
+
+Two consequences worth stating: shared components take **loading and empty states as part of
+their contract** (each renders its own skeleton and `EmptyState`), so no caller reimplements
+them; and colors, spacing, and radii come from **Tailwind theme tokens**, never hardcoded
+values, so cards and charts stay visually consistent as the app grows.
+
+Since layer 2 is pure, it is testable by rendering with props — Vitest plus Testing Library,
+no Storybook and no running API.
+
 ## Testing
 
 Weighted toward the places where bugs are silent and expensive.
