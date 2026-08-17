@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc --build",
     "dev:worker": "tsx --env-file=../../.env src/worker.ts",
-    "seed": "tsx --env-file=../../.env src/seed.ts"
+    "seed": "tsx --env-file=../../.env src/seed.ts",
+    "backfill": "tsx --env-file=../../.env src/backfill.ts"
   },
   "dependencies": {
     "@jfstats/db": "workspace:*",
