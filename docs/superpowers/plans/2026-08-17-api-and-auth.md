@@ -74,7 +74,7 @@ Gets a server running with a health route, so every later task has somewhere to 
 - Produces:
   - `createApp(context: AppContext): Hono<{ Variables: AppVariables }>` — the assembled app, used by every route task and by the tests.
   - `export type AppType = ReturnType<typeof createApp>` — Plan 3's typed client depends on this exact name.
-  - `interface AppVariables { session: SessionRecord | null }` — Task 4 defines `SessionRecord`; for now declare it as `unknown` and Task 4 narrows it.
+  - `interface AppVariables { session: unknown }` — **Task 3** defines the real `SessionRecord` type and **Task 6**'s middleware narrows this to it. Declare it as `unknown` here and widen the app's generic when Task 6 lands; do not invent a placeholder `SessionRecord` in this task.
   - `pnpm --filter @jfstats/server dev:api`
 
 - [ ] **Step 1: Add dependencies**
