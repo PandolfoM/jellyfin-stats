@@ -6,15 +6,18 @@
   "scripts": {
     "build": "tsc --build",
     "dev:worker": "tsx --env-file=../../.env src/worker.ts",
+    "dev:api": "tsx --env-file=../../.env src/api.ts",
     "seed": "tsx --env-file=../../.env src/seed.ts",
     "backfill": "tsx --env-file=../../.env src/backfill.ts"
   },
   "dependencies": {
+    "@hono/node-server": "^2.1.1",
     "@jfstats/db": "workspace:*",
     "@jfstats/jellyfin": "workspace:*",
     "@jfstats/shared": "workspace:*",
     "bullmq": "^5.34.2",
     "drizzle-orm": "^0.38.2",
+    "hono": "^4.13.2",
     "ioredis": "^5.4.2",
     "pg": "^8.13.1",
     "pino": "^9.5.0",
