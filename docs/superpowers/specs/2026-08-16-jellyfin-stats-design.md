@@ -120,7 +120,8 @@ which we generate ourselves, is a real `uuid`.
 
 `playback_sessions` — one row per stream:
 
-`id` (uuid PK), `play_session_id` (Jellyfin's own, **unique-indexed**), `user_id`,
+`id` (uuid PK), `session_id` (Jellyfin's session id, **partially unique-indexed** — see
+below), `user_id`,
 `item_id`, `device_id`, `client`, `started_at`, `ended_at` (nullable), `last_seen_at`,
 `play_method` (`DirectPlay` | `DirectStream` | `Transcode`), `position_ticks`, `watch_ms`,
 `is_paused`, `completed`, `remote_endpoint`.
@@ -181,7 +182,7 @@ server.
 1. **Watch time is accumulated, never derived.** Each poll adds the elapsed delta only while
    the stream is unpaused, **clamped to 1.5× the poll interval**. A worker stall or paused
    container cannot inflate a user's stats.
-2. **Idempotent writes.** `play_session_id` is unique-indexed, so a replayed poll or
+2. **Idempotent writes.** `session_id` is unique-indexed *among open rows only*, so a replayed poll or
    double-delivered job updates the existing row rather than creating a phantom stream.
 3. **Startup reconciliation.** Postgres is the source of truth. On worker start, any session
    with `ended_at IS NULL` and `last_seen_at` older than 2× the poll interval is closed at
@@ -191,6 +192,35 @@ Redis holds the live snapshot (TTL'd) purely as a fast cache; losing it costs no
 because state rebuilds from Postgres.
 
 A play counts as **completed** when `position_ticks / runtime_ticks >= 0.9` (configurable).
+
+### Verified behavior of the real Jellyfin API
+
+Measured against a live Jellyfin **10.11.11** server during implementation. Every item here
+contradicted an assumption in the original spec, and each one produced a silent bug that unit
+tests could not catch, because the fixtures were hand-written from the same wrong assumption.
+Treat this section as the authority over anything inferred from the docs.
+
+- **`/Sessions` does not return `PlaySessionId`.** It is absent entirely, even on an actively
+  playing session. The identity of a stream is the session's **`Id`** (32-char hex) combined
+  with `NowPlayingItem.Id`. Dropping sessions that lack `PlaySessionId` means recording
+  nothing at all.
+- **A session `Id` is stable across items** for the lifetime of a client connection. So
+  `(session_id, item_id)` repeats when someone re-watches the same episode in one sitting.
+  The identity index is therefore **partial** — `UNIQUE (session_id, item_id) WHERE ended_at
+  IS NULL` — so completed rows stop constraining, and a re-watch opens a new row instead of
+  merging into the old one.
+- **An item's `ParentId` is not its library.** For an Episode it is the Season; for a Movie it
+  is a collection folder. Neither matches the `ItemId` values from `/Library/VirtualFolders`.
+  An item's library must come from **querying per library** (`ParentId=<libraryId>&Recursive=true`)
+  and tagging results with the library that was queried.
+- `SeriesId` and `SeasonId` *are* returned on episodes by default and need no `Fields` request.
+  `ParentId` does require `Fields=ParentId`; `ImageTags` requires `EnableImages=true`.
+- **Paused state must be read from the payload every poll**, not inferred from a state
+  transition. A stream stays paused across many polls while only reporting the transition once.
+
+The general lesson, for Plans 2 and 3: **a fixture written from an assumption will confirm that
+assumption forever.** Any new Jellyfin endpoint this project consumes gets verified against a
+real server before code depends on its shape.
 
 ### Live updates
 

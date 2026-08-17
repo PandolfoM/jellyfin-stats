@@ -10,6 +10,18 @@
 
 This plan is Plan 1 of 3. Plan 2 adds the HTTP API and authentication; Plan 3 adds the web UI and production image. Spec: [`docs/superpowers/specs/2026-08-16-jellyfin-stats-design.md`](../specs/2026-08-16-jellyfin-stats-design.md).
 
+> **⚠️ Read this before copying any code from this plan.** Live verification against a real
+> Jellyfin 10.11.11 server invalidated several assumptions baked into the task text below.
+> Most importantly: **`/Sessions` returns no `PlaySessionId`** (the field this plan keys
+> streams on does not exist), and **an item's `ParentId` is not its library**. The shipped
+> code renames `playSessionId` → `sessionId` throughout, makes the identity index partial on
+> open rows, and resolves an item's library by querying per library.
+>
+> The spec's **"Verified behavior of the real Jellyfin API"** section is the authority. Where
+> this plan and the committed code disagree, the code is right — read
+> `packages/jellyfin/src/client.ts`, `packages/db/src/schema.ts`, and
+> `packages/db/src/repositories/playback.ts` rather than the snippets here.
+
 ## Global Constraints
 
 - **Node 22 LTS.** `engines.node` is `>=22`. Verified present: v22.14.0.
