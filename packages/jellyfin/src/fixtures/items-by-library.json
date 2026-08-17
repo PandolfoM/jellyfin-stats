@@ -1,0 +1,32 @@
+{
+  "movies": {
+    "Items": [
+      {
+        "Id": "aaaa1111aaaa1111aaaa1111aaaa1111",
+        "Name": "Fixture Movie",
+        "Type": "Movie",
+        "ParentId": "99999999999999999999999999999999",
+        "ProductionYear": 2023,
+        "RunTimeTicks": 12000000000,
+        "ImageTags": { "Primary": "tag1" }
+      }
+    ],
+    "TotalRecordCount": 1
+  },
+  "shows": {
+    "Items": [
+      {
+        "Id": "bbbb2222bbbb2222bbbb2222bbbb2222",
+        "Name": "Fixture Episode",
+        "Type": "Episode",
+        "SeriesId": "cccc3333cccc3333cccc3333cccc3333",
+        "SeasonId": "dddd4444dddd4444dddd4444dddd4444",
+        "ParentId": "dddd4444dddd4444dddd4444dddd4444",
+        "ProductionYear": 2022,
+        "RunTimeTicks": 1500000000,
+        "ImageTags": { "Primary": "tag2" }
+      }
+    ],
+    "TotalRecordCount": 1
+  }
+}

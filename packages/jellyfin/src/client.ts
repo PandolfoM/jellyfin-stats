@@ -75,70 +75,83 @@ export function createJellyfinClient(options: JellyfinClientOptions): JellyfinCl
     return parsed.data;
   }
 
-  return {
-    async getSessions() {
-      const raw = await request("/Sessions", sessionsSchema);
+  async function getSessions(): Promise<LiveSession[]> {
+    const raw = await request("/Sessions", sessionsSchema);
 
-      return raw.flatMap((entry): LiveSession[] => {
-        const item = entry.NowPlayingItem;
-        // Idle sessions and sessions missing playback identity carry no history.
-        if (!item || !entry.PlaySessionId || !entry.UserId) return [];
+    return raw.flatMap((entry): LiveSession[] => {
+      const item = entry.NowPlayingItem;
+      // Idle sessions and sessions missing playback identity carry no history.
+      if (!item || !entry.PlaySessionId || !entry.UserId) return [];
 
-        return [
-          {
-            playSessionId: entry.PlaySessionId,
-            userId: entry.UserId,
-            userName: entry.UserName ?? "unknown",
-            itemId: item.Id,
-            itemName: item.Name,
-            deviceId: entry.DeviceId ?? "unknown",
-            deviceName: entry.DeviceName ?? "unknown",
-            client: entry.Client ?? "unknown",
-            playMethod: normalisePlayMethod(entry.PlayState?.PlayMethod),
-            positionTicks: entry.PlayState?.PositionTicks ?? 0,
-            runtimeTicks: item.RunTimeTicks ?? null,
-            isPaused: entry.PlayState?.IsPaused ?? false,
-            remoteEndpoint: entry.RemoteEndPoint ?? null,
-          },
-        ];
-      });
-    },
+      return [
+        {
+          playSessionId: entry.PlaySessionId,
+          userId: entry.UserId,
+          userName: entry.UserName ?? "unknown",
+          itemId: item.Id,
+          itemName: item.Name,
+          deviceId: entry.DeviceId ?? "unknown",
+          deviceName: entry.DeviceName ?? "unknown",
+          client: entry.Client ?? "unknown",
+          playMethod: normalisePlayMethod(entry.PlayState?.PlayMethod),
+          positionTicks: entry.PlayState?.PositionTicks ?? 0,
+          runtimeTicks: item.RunTimeTicks ?? null,
+          isPaused: entry.PlayState?.IsPaused ?? false,
+          remoteEndpoint: entry.RemoteEndPoint ?? null,
+        },
+      ];
+    });
+  }
 
-    async getUsers() {
-      const raw = await request("/Users", usersSchema);
-      return raw.map((user) => ({
-        id: user.Id,
-        name: user.Name,
-        isAdmin: user.Policy?.IsAdministrator ?? false,
-      }));
-    },
+  async function getUsers(): Promise<JellyfinUser[]> {
+    const raw = await request("/Users", usersSchema);
+    return raw.map((user) => ({
+      id: user.Id,
+      name: user.Name,
+      isAdmin: user.Policy?.IsAdministrator ?? false,
+    }));
+  }
 
-    async getLibraries() {
-      const raw = await request("/Library/VirtualFolders", librariesSchema);
-      return raw.map((library) => ({
-        id: library.ItemId,
-        name: library.Name,
-        collectionType: library.CollectionType ?? null,
-      }));
-    },
+  async function getLibraries(): Promise<JellyfinLibrary[]> {
+    const raw = await request("/Library/VirtualFolders", librariesSchema);
+    return raw.map((library) => ({
+      id: library.ItemId,
+      name: library.Name,
+      collectionType: library.CollectionType ?? null,
+    }));
+  }
 
-    async getItems() {
-      const raw = await request(
-        "/Items?Recursive=true&IncludeItemTypes=Movie,Episode,Audio&Fields=ParentId,ProductionYear&EnableImages=true",
-        itemsSchema,
-      );
+  async function getItems(): Promise<JellyfinItem[]> {
+    // An item carries no "library id" field of its own — ParentId is the item's
+    // immediate parent (season for an episode, collection folder for a movie), not
+    // the library's id from /Library/VirtualFolders. So the library has to be
+    // established by the query: fetch each library's descendants separately and
+    // tag every returned item with the library id it was queried under.
+    const libraries = await getLibraries();
 
-      return raw.Items.map((item) => ({
-        id: item.Id,
-        name: item.Name,
-        type: item.Type,
-        libraryId: item.ParentId ?? null,
-        seriesId: item.SeriesId ?? null,
-        seasonId: item.SeasonId ?? null,
-        productionYear: item.ProductionYear ?? null,
-        runtimeTicks: item.RunTimeTicks ?? null,
-        imageTag: item.ImageTags?.Primary ?? null,
-      }));
-    },
-  };
+    const perLibrary = await Promise.all(
+      libraries.map(async (library) => {
+        const raw = await request(
+          `/Items?ParentId=${encodeURIComponent(library.id)}&Recursive=true&IncludeItemTypes=Movie,Episode,Audio&Fields=ProductionYear&EnableImages=true`,
+          itemsSchema,
+        );
+
+        return raw.Items.map((item) => ({
+          id: item.Id,
+          name: item.Name,
+          type: item.Type,
+          libraryId: library.id,
+          seriesId: item.SeriesId ?? null,
+          seasonId: item.SeasonId ?? null,
+          productionYear: item.ProductionYear ?? null,
+          runtimeTicks: item.RunTimeTicks ?? null,
+          imageTag: item.ImageTags?.Primary ?? null,
+        }));
+      }),
+    );
+
+    return perLibrary.flat();
+  }
+
+  return { getSessions, getUsers, getLibraries, getItems };
 }

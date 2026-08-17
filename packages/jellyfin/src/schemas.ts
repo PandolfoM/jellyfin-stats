@@ -52,7 +52,11 @@ export const librarySchema = z.object({
 export const librariesSchema = z.array(librarySchema);
 
 export const itemsSchema = z.object({
-  Items: z.array(nowPlayingItemSchema.extend({ ParentId: z.string().nullish() })),
+  // No "library id" field exists on an item — an item's ParentId is its immediate
+  // parent (season for an episode, collection folder for a movie), not the library
+  // it lives in. The library id has to come from the query, not this payload; see
+  // getItems() in client.ts.
+  Items: z.array(nowPlayingItemSchema),
   TotalRecordCount: z.number(),
 });
 

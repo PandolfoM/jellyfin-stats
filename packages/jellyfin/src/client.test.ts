@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import sessionsFixture from "./fixtures/sessions.json";
 import usersFixture from "./fixtures/users.json";
+import librariesFixture from "./fixtures/libraries.json";
+import itemsByLibraryFixture from "./fixtures/items-by-library.json";
 import { createJellyfinClient } from "./client.js";
 
 function clientWith(payload: unknown, status = 200) {
@@ -10,6 +12,30 @@ function clientWith(payload: unknown, status = 200) {
       headers: { "content-type": "application/json" },
     }),
   );
+
+  const client = createJellyfinClient({
+    baseUrl: "http://jellyfin.test:8096",
+    apiKey: "test-key",
+    fetch: fetchMock as unknown as typeof fetch,
+  });
+
+  return { client, fetchMock };
+}
+
+/** Routes requests by substring match against the URL, for endpoints (like getItems)
+ * that issue more than one request per call. */
+function clientWithRoutes(routes: Array<[path: string, payload: unknown]>) {
+  const fetchMock = vi.fn<typeof fetch>(async (input) => {
+    const url = String(input);
+    const match = routes.find(([path]) => url.includes(path));
+    if (!match) {
+      throw new Error(`Unhandled request in test: ${url}`);
+    }
+    return new Response(JSON.stringify(match[1]), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
 
   const client = createJellyfinClient({
     baseUrl: "http://jellyfin.test:8096",
@@ -95,5 +121,30 @@ describe("createJellyfinClient", () => {
     const { client } = clientWith({ unexpected: true });
 
     await expect(client.getSessions()).rejects.toThrow(/Unexpected Jellyfin response/);
+  });
+
+  it("tags each item with the library it was queried from, not its own ParentId", async () => {
+    const { movies, shows } = librariesFixture;
+    const { client } = clientWithRoutes([
+      ["/Library/VirtualFolders", [movies, shows]],
+      [`ParentId=${movies.ItemId}`, itemsByLibraryFixture.movies],
+      [`ParentId=${shows.ItemId}`, itemsByLibraryFixture.shows],
+    ]);
+
+    const items = await client.getItems();
+
+    expect(items).toHaveLength(2);
+
+    const movieItem = items.find((item) => item.id === itemsByLibraryFixture.movies.Items[0]?.Id);
+    const episodeItem = items.find((item) => item.id === itemsByLibraryFixture.shows.Items[0]?.Id);
+
+    expect(movieItem?.libraryId).toBe(movies.ItemId);
+    expect(episodeItem?.libraryId).toBe(shows.ItemId);
+
+    // Each fixture item's own ParentId differs from the library it belongs to
+    // (season id for the episode, collection folder id for the movie) — this proves
+    // libraryId came from the query, not from item.ParentId.
+    expect(movieItem?.libraryId).not.toBe(itemsByLibraryFixture.movies.Items[0]?.ParentId);
+    expect(episodeItem?.libraryId).not.toBe(itemsByLibraryFixture.shows.Items[0]?.ParentId);
   });
 });
