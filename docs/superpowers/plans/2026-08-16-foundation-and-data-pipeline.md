@@ -2089,6 +2089,22 @@ export async function recomputeRollupRange(db: Db, from: Date, to: Date): Promis
 }
 ```
 
+> **Superseded during implementation — `recomputeRollupRange` above is not the shipped
+> version.** The snippet's DELETE compared `day` against date-strings sliced from the
+> `from`/`to` boundary instants while its INSERT compared raw `started_at` timestamps. Those
+> two agree only for exactly midnight-aligned bounds, and 5 of the 8 call sites in this plan
+> pass non-aligned bounds (Task 11's nightly `new Date()`, Task 12's seed, three Task 13
+> tests) — so it would have thrown a primary-key violation or silently written a partial day.
+>
+> The shipped fix (commit `9fa35a1`) normalizes both bounds to UTC day boundaries once —
+> flooring `from`, ceiling `to` to the next UTC day unless already aligned — and derives the
+> DELETE's day strings and the INSERT's timestamp bounds from those same values, so the two
+> provably cover an identical day set for any input. The range is half-open on **whole UTC
+> days**: any `from`/`to` falling inside a day pulls that entire day into the recompute.
+>
+> Read `packages/db/src/repositories/playback.ts` for the real implementation rather than
+> copying the block above.
+
 - [ ] **Step 4: Export from the package index**
 
 `packages/db/src/index.ts`:
