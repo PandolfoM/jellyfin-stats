@@ -1,4 +1,4 @@
-import { createDb, recomputeRollupRange } from "@jfstats/db";
+import { createDb, recomputeRollupRange, type Db } from "@jfstats/db";
 import { loadEnv } from "@jfstats/shared";
 
 export interface BackfillRange {
@@ -62,9 +62,10 @@ export function parseBackfillArgs(argv: readonly string[]): BackfillRange | { er
   if (from === null) return { error: `Could not parse --from "${rawFrom}" as YYYY-MM-DD.\n${USAGE}` };
   if (to === null) return { error: `Could not parse --to "${rawTo}" as YYYY-MM-DD.\n${USAGE}` };
 
-  // recomputeRollupRange ceils a `to` that is not already on a day boundary up to the
-  // next day, so a same-day --from/--to rebuilds exactly that one day. An inverted
-  // range would silently rebuild nothing, which is worse than refusing.
+  // --to is inclusive (runBackfill advances it by one UTC day before handing the range
+  // to recomputeRollupRange, which itself takes a half-open [from, to) range), so a
+  // same-day --from/--to rebuilds exactly that one day. An inverted range would
+  // silently rebuild nothing, which is worse than refusing.
   if (to.getTime() < from.getTime()) {
     return { error: `--to (${rawTo}) is before --from (${rawFrom}).\n${USAGE}` };
   }
@@ -72,11 +73,31 @@ export function parseBackfillArgs(argv: readonly string[]): BackfillRange | { er
   return { from, to };
 }
 
-/** Whole UTC days the range covers, for reporting what was rebuilt. */
+/** Whole UTC days the range covers, for reporting what was rebuilt. --to is inclusive. */
 export function dayCount(range: BackfillRange): number {
   const dayMs = 24 * 60 * 60 * 1000;
-  // `to` on a day boundary is exclusive; a same-day range still covers one day.
-  return Math.max(1, (range.to.getTime() - range.from.getTime()) / dayMs);
+  return (range.to.getTime() - range.from.getTime()) / dayMs + 1;
+}
+
+/**
+ * Rebuilds playback_rollup_daily for the inclusive range [from, to] and returns the
+ * number of whole UTC days actually covered. This is the one code path main() and the
+ * integration test both drive, so a test that calls this is exercising exactly what
+ * `--from D --to D` runs — not a reimplementation of it.
+ *
+ * recomputeRollupRange takes a half-open [from, to) range. Every `to` parseBackfillArgs
+ * can produce is already a UTC day boundary (parseUtcDay's only output shape), so
+ * recomputeRollupRange's own ceiling of a non-boundary `to` never fires for this
+ * caller — passing `range.to` straight through would make `--to` exclusive for every
+ * value this parser can produce. Advancing it by one UTC day here, explicitly, is what
+ * makes `--to` inclusive; that is clearer to a future reader than depending on a ceil
+ * branch that this caller can never trigger.
+ */
+export async function runBackfill(db: Db, range: BackfillRange): Promise<number> {
+  const exclusiveTo = new Date(range.to);
+  exclusiveTo.setUTCDate(exclusiveTo.getUTCDate() + 1);
+  await recomputeRollupRange(db, range.from, exclusiveTo);
+  return dayCount(range);
 }
 
 /**
@@ -102,11 +123,9 @@ async function main(): Promise<void> {
   const toDay = parsed.to.toISOString().slice(0, 10);
 
   try {
-    console.log(`Rebuilding daily rollups from ${fromDay} through ${toDay}...`);
-    await recomputeRollupRange(db, parsed.from, parsed.to);
-    console.log(
-      `Rebuilt ${dayCount(parsed)} day(s) of playback_rollup_daily from playback_sessions.`,
-    );
+    console.log(`Rebuilding daily rollups from ${fromDay} through ${toDay} (inclusive)...`);
+    const days = await runBackfill(db, parsed);
+    console.log(`Rebuilt ${days} day(s) of playback_rollup_daily from playback_sessions.`);
   } finally {
     await pool.end();
   }

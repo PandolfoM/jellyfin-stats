@@ -84,7 +84,10 @@ pnpm --filter @jfstats/server backfill --from 2026-08-10 --to 2026-08-17
 ```
 
 Both dates are `YYYY-MM-DD` and are interpreted as UTC day starts. The range covers
-whole UTC days; passing the same date for both rebuilds exactly that day. This touches
+whole UTC days and `--to` is inclusive: `--from 2026-08-10 --to 2026-08-17` rebuilds
+all 8 named days, and passing the same date for both rebuilds exactly that one day.
+(The underlying `recomputeRollupRange` takes a half-open `[from, to)` range, so the
+script advances the parsed `--to` by one UTC day before calling it.) This touches
 only `playback_rollup_daily` and reads `playback_sessions`, so unlike the seed it adds
 no fake data.
 
