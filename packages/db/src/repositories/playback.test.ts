@@ -490,8 +490,11 @@ describe("playback repositories", () => {
 
   it("deleteSeededSessions removes only seed-prefixed sessions, leaving real ones untouched", async () => {
     await withTestDatabase(async (db) => {
-      // A realistic Jellyfin session id: 32-character hex, as real Jellyfin issues.
-      const realSessionId = "a656b907eb3a73532e40e44b968d0225";
+      // Shaped like a real Jellyfin session id (32-character hex, as real Jellyfin
+      // issues) but obviously fabricated — repeated "deadbeef" — so it can never be
+      // mistaken for a captured value. It must still be able to survive
+      // deleteSeededSessions' LIKE 'seed-%' filter, which is the point of the test.
+      const realSessionId = "deadbeefdeadbeefdeadbeefdeadbeef";
 
       await openSession(db, { ...OPEN, sessionId: realSessionId });
       await openSession(db, { ...OPEN, sessionId: "seed-ps-1", itemId: "item-2" });
@@ -508,8 +511,11 @@ describe("playback repositories", () => {
 
   it("deleteSeededRollupRows removes only seed-user-prefixed rows, leaving real ones untouched", async () => {
     await withTestDatabase(async (db) => {
-      // A realistic Jellyfin user id: 32-character hex, as real Jellyfin issues.
-      const realUserId = "3fa07a1cf2b74b6a9c2f6c9c6e9c7a3d";
+      // Shaped like a real Jellyfin user id (32-character hex, as real Jellyfin
+      // issues) but obviously fabricated, so it can never be mistaken for a
+      // captured value. It must still be able to survive deleteSeededRollupRows'
+      // LIKE 'seed-user-%' filter, which is the point of the test.
+      const realUserId = "aaaaaaaabbbbccccddddeeeeffff0000";
 
       await applyRollupDelta(db, {
         day: "2026-08-16",
