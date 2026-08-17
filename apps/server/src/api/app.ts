@@ -14,6 +14,7 @@ import { requireAdmin } from "./middleware/auth.js";
 import { createRateLimiter } from "./rate-limit.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHistoryRoutes } from "./routes/history.js";
+import { registerImageRoutes } from "./routes/images.js";
 import { registerLiveRoute } from "./routes/live.js";
 import { registerStatsRoutes } from "./routes/stats.js";
 import { createSessionStore, type SessionRecord } from "./sessions.js";
@@ -61,6 +62,9 @@ export function createApp(context: AppContext) {
   // The live feed exposes who is watching what, in real time — the same
   // sensitivity as history, and gated the same way.
   app.use("/api/live", requireAdmin(sessions, cookieConfig));
+  // Ungated, this would let anyone who can reach the port enumerate a
+  // private media library by walking item ids.
+  app.use("/api/images/*", requireAdmin(sessions, cookieConfig));
 
   registerStatsRoutes(app, {
     getOverview: (range) => getOverview(context.db, range),
@@ -72,6 +76,22 @@ export function createApp(context: AppContext) {
   });
 
   registerHistoryRoutes(app, { getHistory: (options) => getHistory(context.db, options) });
+
+  registerImageRoutes(app, {
+    fetchImage: async (itemId, options) => {
+      const url = new URL(`${context.env.JELLYFIN_URL}/Items/${itemId}/Images/Primary`);
+      url.searchParams.set("maxWidth", String(options.maxWidth));
+      if (options.tag !== undefined) url.searchParams.set("tag", options.tag);
+
+      // The API key travels only in this server-to-server Authorization
+      // header — never in the URL (query strings end up in logs) and never
+      // forwarded to the browser.
+      return fetch(url, {
+        headers: { Authorization: `MediaBrowser Token="${context.env.JELLYFIN_API_KEY}"` },
+        signal: AbortSignal.timeout(15_000),
+      });
+    },
+  });
 
   registerLiveRoute(app, {
     loadCurrent: () => context.snapshots.loadLive(),

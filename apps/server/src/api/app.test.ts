@@ -79,4 +79,15 @@ describe("createApp", () => {
 
     expect(response.status).toBe(401);
   });
+
+  it("rejects an unauthenticated request to the image proxy", async () => {
+    // Proves requireAdmin is actually mounted on this route, not merely
+    // written elsewhere: an open image proxy would let anyone who can reach
+    // the port enumerate a private media library by walking item ids.
+    const app = createApp(testContext());
+
+    const response = await app.request("/api/images/items/anything");
+
+    expect(response.status).toBe(401);
+  });
 });
