@@ -1,11 +1,29 @@
-import { createDb, playbackSessions, recomputeRollupRange, upsertItems, upsertLibraries, upsertUsers } from "@jfstats/db";
+import {
+  createDb,
+  playbackRollupDaily,
+  playbackSessions,
+  recomputeRollupRange,
+  upsertItems,
+  upsertLibraries,
+  upsertUsers,
+} from "@jfstats/db";
 import { loadEnv } from "@jfstats/shared";
+import { like } from "drizzle-orm";
 
 export interface SeedOptions {
   days: number;
   users: number;
   items: number;
   seed: number;
+  /**
+   * Injected clock so generateSeedData is a pure function of its options, not of
+   * wall-clock time — matching the `now?: () => number` pattern used by
+   * reconcileOpenSessions and diffSessions. Defaults to Date.now. Tests pass a
+   * fixed clock so two calls with the same seed produce byte-identical output;
+   * without this, reading Date.now() fresh inside the day loop meant two
+   * invocations that straddled a millisecond boundary could disagree.
+   */
+  now?: () => number;
 }
 
 export interface SeedData {
@@ -45,6 +63,10 @@ const PLAY_METHODS = ["DirectPlay", "DirectStream", "Transcode"];
 export function generateSeedData(options: SeedOptions): SeedData {
   const random = mulberry32(options.seed);
   const pick = <T>(list: readonly T[]): T => list[Math.floor(random() * list.length)] as T;
+  // Read once, up front, so every day in the loop below is computed relative to the
+  // same instant. Reading it fresh per iteration was what made two calls with the
+  // same seed occasionally disagree.
+  const now = (options.now ?? Date.now)();
 
   const libraries = [
     { id: "seed-lib-movies", name: "Movies", collectionType: "movies" },
@@ -75,7 +97,7 @@ export function generateSeedData(options: SeedOptions): SeedData {
 
   for (let dayOffset = options.days; dayOffset > 0; dayOffset -= 1) {
     // Weekends get more viewing, so the trend charts have visible shape.
-    const dayStart = Date.now() - dayOffset * dayMs;
+    const dayStart = now - dayOffset * dayMs;
     const isWeekend = [0, 6].includes(new Date(dayStart).getUTCDay());
     const playsToday = Math.floor(random() * (isWeekend ? 12 : 6));
 
@@ -121,13 +143,33 @@ async function main(): Promise<void> {
   const data = generateSeedData({ days: 90, users: 4, items: 60, seed: 42 });
 
   try {
+    // Every generated session is closed, so re-running this script would never hit
+    // the schema's partial identity index (open rows only) and onConflictDoNothing
+    // would never fire — a second run would just double every row. Deleting this
+    // script's own prior output first, scoped strictly to seed-prefixed
+    // identifiers, is what makes re-running safe. This must never touch the real
+    // data synced from a live Jellyfin server, so the WHERE clauses match only the
+    // "seed-" / "seed-user-" prefixes this script itself writes.
+    const removedSessions = await db
+      .delete(playbackSessions)
+      .where(like(playbackSessions.sessionId, "seed-%"))
+      .returning({ id: playbackSessions.id });
+    const removedRollup = await db
+      .delete(playbackRollupDaily)
+      .where(like(playbackRollupDaily.userId, "seed-user-%"))
+      .returning({ day: playbackRollupDaily.day });
+    console.log(
+      `Removed ${removedSessions.length} previously seeded sessions and ${removedRollup.length} previously seeded rollup rows.`,
+    );
+
+    // Users, libraries, and items are upserted (keyed on id), so re-running is
+    // already safe for them without any delete.
     await upsertUsers(db, data.users);
     await upsertLibraries(db, data.libraries);
     await upsertItems(db, data.items);
-    // All generated sessions are closed, so they never contend for the identity
-    // index (which only covers open rows) — onConflictDoNothing here is just a
-    // guard against re-running the seed script twice with the same seed producing
-    // literally identical rows, not a live constraint the generator relies on.
+    // The delete above already cleared every seed-prefixed session, so this insert
+    // never actually collides — onConflictDoNothing is kept only as a harmless
+    // backstop, not something the idempotency guarantee relies on.
     await db.insert(playbackSessions).values(data.sessions).onConflictDoNothing();
 
     // Build the rollup from the sessions we just wrote, using the same code path

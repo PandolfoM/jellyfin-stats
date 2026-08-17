@@ -13,6 +13,7 @@
     "@jfstats/jellyfin": "workspace:*",
     "@jfstats/shared": "workspace:*",
     "bullmq": "^5.34.2",
+    "drizzle-orm": "^0.38.2",
     "ioredis": "^5.4.2",
     "pg": "^8.13.1",
     "pino": "^9.5.0",

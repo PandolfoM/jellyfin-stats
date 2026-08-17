@@ -3,8 +3,12 @@ import { generateSeedData } from "./seed.js";
 
 describe("generateSeedData", () => {
   it("is deterministic for a given seed", () => {
-    const a = generateSeedData({ days: 30, users: 4, items: 50, seed: 42 });
-    const b = generateSeedData({ days: 30, users: 4, items: 50, seed: 42 });
+    // A fixed injected clock makes this deterministic by construction, not by luck:
+    // the two calls below would agree even if they were made seconds (or days)
+    // apart in real wall-clock time, because neither one ever reads Date.now().
+    const now = () => 1_777_000_000_000;
+    const a = generateSeedData({ days: 30, users: 4, items: 50, seed: 42, now });
+    const b = generateSeedData({ days: 30, users: 4, items: 50, seed: 42, now });
 
     expect(a).toEqual(b);
   });
@@ -17,10 +21,16 @@ describe("generateSeedData", () => {
   });
 
   it("generates sessions only within the requested window", () => {
-    const data = generateSeedData({ days: 7, users: 2, items: 10, seed: 1 });
-    const earliest = Math.min(...data.sessions.map((s) => s.startedAt.getTime()));
+    const dayMs = 24 * 60 * 60 * 1000;
+    const now = 1_777_000_000_000;
+    const data = generateSeedData({ days: 7, users: 2, items: 10, seed: 1, now: () => now });
 
-    expect(Date.now() - earliest).toBeLessThanOrEqual(8 * 24 * 60 * 60 * 1000);
+    // With the clock fixed, the window is exact: every session must start on or
+    // after the start of the oldest requested day, and strictly before `now`.
+    for (const session of data.sessions) {
+      expect(session.startedAt.getTime()).toBeGreaterThanOrEqual(now - 7 * dayMs);
+      expect(session.startedAt.getTime()).toBeLessThan(now);
+    }
   });
 
   it("gives every session a unique play session and item pair", () => {
