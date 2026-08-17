@@ -3096,7 +3096,7 @@ which the row does not carry.
 pnpm vitest run apps/server/src/sync/applier.test.ts
 ```
 
-Expected: PASS, 10 tests.
+Expected: PASS, 9 tests.
 
 - [ ] **Step 7: Commit**
 
