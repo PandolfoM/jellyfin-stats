@@ -1,0 +1,107 @@
+import {
+  bigint,
+  boolean,
+  date,
+  index,
+  integer,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
+
+// Jellyfin-issued identifiers are 32-character dashless hex. They are stored as
+// text verbatim; converting to uuid on every read and write buys nothing.
+
+export const jellyfinUsers = pgTable("jellyfin_users", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  isAdmin: boolean("is_admin").notNull().default(false),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+  archived: boolean("archived").notNull().default(false),
+});
+
+export const libraries = pgTable("libraries", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  collectionType: text("collection_type"),
+  itemCount: integer("item_count").notNull().default(0),
+  archived: boolean("archived").notNull().default(false),
+});
+
+export const items = pgTable(
+  "items",
+  {
+    id: text("id").primaryKey(),
+    libraryId: text("library_id"),
+    type: text("type").notNull(),
+    name: text("name").notNull(),
+    seriesId: text("series_id"),
+    seasonId: text("season_id"),
+    productionYear: integer("production_year"),
+    runtimeTicks: bigint("runtime_ticks", { mode: "number" }),
+    imageTag: text("image_tag"),
+    archived: boolean("archived").notNull().default(false),
+  },
+  (table) => [
+    index("items_library_idx").on(table.libraryId),
+    index("items_series_idx").on(table.seriesId),
+  ],
+);
+
+export const devices = pgTable("devices", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  client: text("client"),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+});
+
+export const playbackSessions = pgTable(
+  "playback_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    playSessionId: text("play_session_id").notNull(),
+    userId: text("user_id").notNull(),
+    itemId: text("item_id").notNull(),
+    deviceId: text("device_id"),
+    client: text("client"),
+    playMethod: text("play_method"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull(),
+    positionTicks: bigint("position_ticks", { mode: "number" }).notNull().default(0),
+    watchMs: bigint("watch_ms", { mode: "number" }).notNull().default(0),
+    isPaused: boolean("is_paused").notNull().default(false),
+    completed: boolean("completed").notNull().default(false),
+    remoteEndpoint: text("remote_endpoint"),
+  },
+  (table) => [
+    // The idempotency guarantee: a replayed poll updates this row instead of
+    // inserting a phantom second stream.
+    uniqueIndex("playback_sessions_identity_uniq").on(table.playSessionId, table.itemId),
+    index("playback_sessions_open_idx").on(table.endedAt),
+    index("playback_sessions_user_started_idx").on(table.userId, table.startedAt),
+    index("playback_sessions_item_started_idx").on(table.itemId, table.startedAt),
+  ],
+);
+
+export const playbackRollupDaily = pgTable(
+  "playback_rollup_daily",
+  {
+    day: date("day").notNull(),
+    userId: text("user_id").notNull(),
+    itemId: text("item_id").notNull(),
+    libraryId: text("library_id"),
+    playCount: integer("play_count").notNull().default(0),
+    watchMs: bigint("watch_ms", { mode: "number" }).notNull().default(0),
+  },
+  (table) => [
+    primaryKey({ columns: [table.day, table.userId, table.itemId] }),
+    index("rollup_day_idx").on(table.day),
+    index("rollup_user_day_idx").on(table.userId, table.day),
+    index("rollup_item_day_idx").on(table.itemId, table.day),
+    index("rollup_library_day_idx").on(table.libraryId, table.day),
+  ],
+);
