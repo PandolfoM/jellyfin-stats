@@ -8,6 +8,7 @@ import {
   getWatchTimeSeries,
 } from "@jfstats/db";
 import { Hono } from "hono";
+import type Redis from "ioredis";
 import type { AppContext } from "../context.js";
 import { LIVE_CHANNEL } from "../sync/snapshot-store.js";
 import { requireAdmin } from "./middleware/auth.js";
@@ -15,7 +16,7 @@ import { createRateLimiter } from "./rate-limit.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHistoryRoutes } from "./routes/history.js";
 import { registerImageRoutes } from "./routes/images.js";
-import { registerLiveRoute } from "./routes/live.js";
+import { registerLiveRoute, type LiveDeps } from "./routes/live.js";
 import { registerStatsRoutes } from "./routes/stats.js";
 import { createSessionStore, type SessionRecord } from "./sessions.js";
 
@@ -23,6 +24,33 @@ import { createSessionStore, type SessionRecord } from "./sessions.js";
  * session has been resolved and re-checked for admin access. */
 export interface AppVariables {
   session: SessionRecord;
+}
+
+/**
+ * A subscribed ioredis client cannot run ordinary commands, so this duplicates
+ * the shared connection rather than reusing it — sharing it would break the
+ * session store on the first SSE connection.
+ *
+ * Exported so the exception-safety of the try/catch below (a duplicated
+ * connection must not be leaked if the SUBSCRIBE call itself fails) can be
+ * unit-tested without going through the full authenticated request path.
+ */
+export function createLiveSubscriber(redis: Redis): LiveDeps["subscribe"] {
+  return async (onMessage) => {
+    const subscriber = redis.duplicate();
+    try {
+      await subscriber.subscribe(LIVE_CHANNEL);
+    } catch (error) {
+      // subscriber.duplicate() already opened the connection; if SUBSCRIBE
+      // itself fails, nothing else will ever call quit() on it.
+      await subscriber.quit();
+      throw error;
+    }
+    subscriber.on("message", (_channel, payload) => onMessage(payload));
+    return async () => {
+      await subscriber.quit();
+    };
+  };
 }
 
 export function createApp(context: AppContext) {
@@ -95,16 +123,7 @@ export function createApp(context: AppContext) {
 
   registerLiveRoute(app, {
     loadCurrent: () => context.snapshots.loadLive(),
-    subscribe: async (onMessage) => {
-      // A subscribed ioredis client cannot run ordinary commands. Sharing
-      // context.redis would break the session store on the first SSE connection.
-      const subscriber = context.redis.duplicate();
-      await subscriber.subscribe(LIVE_CHANNEL);
-      subscriber.on("message", (_channel, payload) => onMessage(payload));
-      return async () => {
-        await subscriber.quit();
-      };
-    },
+    subscribe: createLiveSubscriber(context.redis),
   });
 
   app.notFound((c) => c.json({ error: "not_found" }, 404));

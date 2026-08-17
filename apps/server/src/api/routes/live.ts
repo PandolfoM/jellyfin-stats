@@ -14,18 +14,32 @@ const HEARTBEAT_MS = 25_000;
 export function registerLiveRoute<E extends Env>(app: Hono<E>, deps: LiveDeps): void {
   app.get("/api/live", (c) => {
     return streamSSE(c, async (stream) => {
-      // Subscribe — and register the abort cleanup for it — before writing anything.
-      // A client can disconnect the instant the first byte arrives; if cleanup were
-      // registered only after that first write, an abort landing in between would
-      // leak the duplicated Redis connection because Hono's onAbort() does not
-      // retroactively notify listeners added after abort() already ran.
+      // Track abort before calling subscribe() at all — registered synchronously,
+      // before cb's first await, so it is in place before the caller can possibly
+      // have gotten hold of a reader to cancel. subscribe() does a real network
+      // round trip in production (SUBSCRIBE over a fresh connection); a client
+      // that disconnects while that is still in flight must not leak the
+      // duplicated Redis connection it eventually resolves to.
+      let aborted = false;
+      stream.onAbort(() => {
+        aborted = true;
+      });
+
       const unsubscribe = await deps.subscribe((payload) => {
         void stream.writeSSE({ event: "sessions", data: payload });
       });
 
-      // Idle proxies close a silent connection; a periodic frame keeps it open.
+      if (aborted) {
+        // The client is already gone; nothing else has been set up yet
+        // (no heartbeat, no second onAbort), so unsubscribing is the only cleanup.
+        await unsubscribe();
+        return;
+      }
+
+      // Idle proxies close a silent connection; a periodic comment keeps it open
+      // without dispatching a "message" or named event to the client at all.
       const heartbeat = setInterval(() => {
-        void stream.writeSSE({ event: "ping", data: "" });
+        void stream.write(":\n\n");
       }, HEARTBEAT_MS);
 
       stream.onAbort(() => {

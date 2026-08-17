@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { createApp } from "./app.js";
+import type Redis from "ioredis";
+import { describe, expect, it, vi } from "vitest";
+import { createApp, createLiveSubscriber } from "./app.js";
 import type { AppContext } from "../context.js";
 
 function testContext(): AppContext {
@@ -89,5 +90,52 @@ describe("createApp", () => {
     const response = await app.request("/api/images/items/anything");
 
     expect(response.status).toBe(401);
+  });
+});
+
+describe("createLiveSubscriber", () => {
+  it("quits the duplicated connection if SUBSCRIBE itself rejects, rather than leaking it", async () => {
+    // context.redis.duplicate() opens the connection before SUBSCRIBE is ever
+    // sent. If SUBSCRIBE then rejects (a Redis hiccup), nothing else in the
+    // codebase ever gets a reference to that connection to close it — the
+    // duplicated client must clean up after itself.
+    const quit = vi.fn(async () => {});
+    const fakeSubscriber = {
+      subscribe: vi.fn(async () => {
+        throw new Error("redis hiccup");
+      }),
+      quit,
+      on: vi.fn(),
+    };
+    const redis = { duplicate: vi.fn(() => fakeSubscriber) } as unknown as Redis;
+
+    const subscribe = createLiveSubscriber(redis);
+
+    await expect(subscribe(() => {})).rejects.toThrow("redis hiccup");
+    expect(quit).toHaveBeenCalled();
+  });
+
+  it("does not quit the connection on a successful subscribe, and relays messages", async () => {
+    const quit = vi.fn(async () => {});
+    let deliver: ((channel: string, payload: string) => void) | undefined;
+    const fakeSubscriber = {
+      subscribe: vi.fn(async () => {}),
+      quit,
+      on: vi.fn((_event: string, listener: (channel: string, payload: string) => void) => {
+        deliver = listener;
+      }),
+    };
+    const redis = { duplicate: vi.fn(() => fakeSubscriber) } as unknown as Redis;
+
+    const onMessage = vi.fn();
+    const unsubscribe = await createLiveSubscriber(redis)(onMessage);
+
+    expect(quit).not.toHaveBeenCalled();
+
+    deliver?.("jfstats:sessions:live", "[]");
+    expect(onMessage).toHaveBeenCalledWith("[]");
+
+    await unsubscribe();
+    expect(quit).toHaveBeenCalled();
   });
 });

@@ -77,7 +77,7 @@ describe("GET /api/live", () => {
     expect(deps.subscribe).toHaveBeenCalled();
   });
 
-  it("still opens the stream when the snapshot cannot be read", async () => {
+  it("sends an empty array rather than nothing when the snapshot cannot be read", async () => {
     const { app } = build({
       loadCurrent: vi.fn(async () => {
         throw new Error("redis down");
@@ -85,9 +85,16 @@ describe("GET /api/live", () => {
     });
 
     // A failed snapshot read must not stop the stream — the next poll recovers it.
+    // Asserting only response.status here would not discriminate: streamSSE
+    // returns 200 synchronously before the async callback runs at all, so the
+    // status is 200 regardless of what loadCurrent() does or whether this
+    // try/catch exists. The content of the first chunk is what actually proves
+    // the catch path ran.
     const response = await app.request("/api/live");
+    const text = await firstChunk(response);
 
     expect(response.status).toBe(200);
+    expect(text).toContain("data: []");
   });
 
   it("relays a message from the live channel to the client", async () => {
@@ -122,6 +129,30 @@ describe("GET /api/live", () => {
 
     // Cancelling the reader aborts the underlying stream; give the abort
     // subscriber a tick to run.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(unsubscribe).toHaveBeenCalled();
+  });
+
+  it("unsubscribes immediately if the client disconnects while subscribe() is still in flight", async () => {
+    // In production subscribe() does a real network round trip (SUBSCRIBE over
+    // a fresh Redis connection). A deferred promise here stands in for that gap:
+    // it is still pending when the client disconnects, and only resolves after.
+    const unsubscribe = vi.fn(async () => {});
+    let resolveSubscribe!: (fn: () => Promise<void>) => void;
+    const pending = new Promise<() => Promise<void>>((resolve) => {
+      resolveSubscribe = resolve;
+    });
+    const { app } = build({ subscribe: vi.fn(() => pending) });
+
+    const response = await app.request("/api/live");
+    const reader = response.body?.getReader();
+    // Cancel before subscribe() has resolved at all — no data has been sent yet.
+    await reader?.cancel();
+
+    resolveSubscribe(unsubscribe);
+    await pending;
+    // Let the handler's continuation (the code after `await deps.subscribe(...)`) run.
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(unsubscribe).toHaveBeenCalled();
