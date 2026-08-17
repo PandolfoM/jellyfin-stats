@@ -3,7 +3,15 @@ import { createApp } from "./app.js";
 import type { AppContext } from "../context.js";
 
 function testContext(): AppContext {
-  return { env: { LOG_LEVEL: "error" } } as unknown as AppContext;
+  return {
+    env: {
+      LOG_LEVEL: "error",
+      COOKIE_SECURE: false,
+      SESSION_TTL_HOURS: 168,
+      fallbackAdminEnabled: false,
+    },
+    redis: {},
+  } as unknown as AppContext;
 }
 
 describe("createApp", () => {
