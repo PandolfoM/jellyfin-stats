@@ -1,4 +1,4 @@
-import type { LiveSession, SessionSnapshot } from "@jfstats/shared";
+﻿import type { LiveSession, SessionSnapshot } from "@jfstats/shared";
 import { describe, expect, it } from "vitest";
 import { diffSessions, snapshotKey } from "./diff.js";
 
@@ -7,7 +7,7 @@ const OPTIONS = { now: T0 + 5_000, maxWatchDeltaMs: 7_500 };
 
 function session(overrides: Partial<LiveSession> = {}): LiveSession {
   return {
-    playSessionId: "ps-1",
+    sessionId: "ps-1",
     userId: "user-1",
     userName: "alice",
     itemId: "item-1",
@@ -28,10 +28,10 @@ function snapshotOf(
   live: LiveSession,
   overrides: { observedAt?: number; isPaused?: boolean; positionTicks?: number } = {},
 ): SessionSnapshot {
-  const key = snapshotKey(live.playSessionId, live.itemId);
+  const key = snapshotKey(live.sessionId, live.itemId);
   return {
     [key]: {
-      playSessionId: live.playSessionId,
+      sessionId: live.sessionId,
       itemId: live.itemId,
       positionTicks: overrides.positionTicks ?? live.positionTicks,
       isPaused: overrides.isPaused ?? live.isPaused,
@@ -157,8 +157,8 @@ describe("diffSessions", () => {
   });
 
   it("handles several concurrent streams independently", () => {
-    const a = session({ playSessionId: "ps-a", itemId: "item-a" });
-    const b = session({ playSessionId: "ps-b", itemId: "item-b" });
+    const a = session({ sessionId: "ps-a", itemId: "item-a" });
+    const b = session({ sessionId: "ps-b", itemId: "item-b" });
     const previous = { ...snapshotOf(a), ...snapshotOf(b) };
 
     const { events } = diffSessions(previous, [a], OPTIONS);
@@ -168,8 +168,8 @@ describe("diffSessions", () => {
     expect(events.find((e) => e.key === snapshotKey("ps-b", "item-b"))?.type).toBe("ended");
   });
 
-  it("ignores a session Jellyfin reports without a play session id", () => {
-    const live = session({ playSessionId: "" });
+  it("ignores a session Jellyfin reports without a session id", () => {
+    const live = session({ sessionId: "" });
     const { events, snapshot } = diffSessions({}, [live], OPTIONS);
 
     expect(events).toEqual([]);

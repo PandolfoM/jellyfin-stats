@@ -1,4 +1,4 @@
-import type { LiveSession } from "@jfstats/shared";
+﻿import type { LiveSession } from "@jfstats/shared";
 import { describe, expect, it, vi } from "vitest";
 import { applyEvents, type ApplierDeps } from "./applier.js";
 import { snapshotKey } from "./diff.js";
@@ -7,7 +7,7 @@ const AT = new Date("2026-08-16T20:00:00Z");
 
 function live(overrides: Partial<LiveSession> = {}): LiveSession {
   return {
-    playSessionId: "ps-1",
+    sessionId: "ps-1",
     userId: "user-1",
     userName: "alice",
     itemId: "item-1",
@@ -48,7 +48,7 @@ describe("applyEvents", () => {
     await applyEvents(d, [{ type: "started", key, session, at: AT.getTime() }], new Map([[key, session]]));
 
     expect(d.openSession).toHaveBeenCalledWith(d.db, expect.objectContaining({
-      playSessionId: "ps-1",
+      sessionId: "ps-1",
       itemId: "item-1",
       userId: "user-1",
       playMethod: "DirectPlay",
@@ -129,7 +129,7 @@ describe("applyEvents", () => {
     await applyEvents(d, [{ type: "ended", key, positionTicks: 95, watchedMs: 2_000, at: AT.getTime() }], new Map());
 
     expect(d.closeSession).toHaveBeenCalledWith(d.db, expect.objectContaining({
-      playSessionId: "ps-1",
+      sessionId: "ps-1",
       itemId: "item-1",
       runtimeTicks: null,
     }));

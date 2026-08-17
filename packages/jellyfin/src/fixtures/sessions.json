@@ -1,7 +1,6 @@
 [
   {
     "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "PlaySessionId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "UserId": "11111111111111111111111111111111",
     "UserName": "test-user-one",
     "DeviceId": "cccccccccccccccccccccccccccccccc",
@@ -22,7 +21,6 @@
   },
   {
     "Id": "dddddddddddddddddddddddddddddddd",
-    "PlaySessionId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
     "UserId": "55555555555555555555555555555555",
     "UserName": "test-user-two",
     "DeviceId": "ffffffffffffffffffffffffffffffff",

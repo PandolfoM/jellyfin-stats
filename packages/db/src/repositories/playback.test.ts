@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+﻿import { and, eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { playbackRollupDaily, playbackSessions } from "../schema.js";
 import { stopTestDatabase, withTestDatabase } from "../testing/harness.js";
@@ -16,7 +16,7 @@ afterAll(stopTestDatabase);
 const START = new Date("2026-08-16T20:00:00Z");
 
 const OPEN = {
-  playSessionId: "ps-1",
+  sessionId: "ps-1",
   itemId: "item-1",
   userId: "user-1",
   deviceId: "device-1",
@@ -34,7 +34,7 @@ describe("playback repositories", () => {
 
       const rows = await db.select().from(playbackSessions);
       expect(rows).toHaveLength(1);
-      expect(rows[0]).toMatchObject({ playSessionId: "ps-1", endedAt: null, watchMs: 0 });
+      expect(rows[0]).toMatchObject({ sessionId: "ps-1", endedAt: null, watchMs: 0 });
     });
   });
 
@@ -52,7 +52,7 @@ describe("playback repositories", () => {
     await withTestDatabase(async (db) => {
       await openSession(db, OPEN);
       await touchSession(db, {
-        playSessionId: "ps-1",
+        sessionId: "ps-1",
         itemId: "item-1",
         positionTicks: 50_000_000,
         watchedMs: 5_000,
@@ -60,7 +60,7 @@ describe("playback repositories", () => {
         at: new Date(START.getTime() + 5_000),
       });
       await touchSession(db, {
-        playSessionId: "ps-1",
+        sessionId: "ps-1",
         itemId: "item-1",
         positionTicks: 100_000_000,
         watchedMs: 5_000,
@@ -77,7 +77,7 @@ describe("playback repositories", () => {
     await withTestDatabase(async (db) => {
       await openSession(db, OPEN);
       await closeSession(db, {
-        playSessionId: "ps-1",
+        sessionId: "ps-1",
         itemId: "item-1",
         positionTicks: 95,
         runtimeTicks: 100,
@@ -96,7 +96,7 @@ describe("playback repositories", () => {
     await withTestDatabase(async (db) => {
       await openSession(db, OPEN);
       await closeSession(db, {
-        playSessionId: "ps-1",
+        sessionId: "ps-1",
         itemId: "item-1",
         positionTicks: 10,
         runtimeTicks: 100,
@@ -114,7 +114,7 @@ describe("playback repositories", () => {
     await withTestDatabase(async (db) => {
       await openSession(db, OPEN);
       await closeSession(db, {
-        playSessionId: "ps-1",
+        sessionId: "ps-1",
         itemId: "item-1",
         positionTicks: 500,
         runtimeTicks: null,
@@ -133,7 +133,7 @@ describe("playback repositories", () => {
       await openSession(db, OPEN);
 
       const ref = await touchSession(db, {
-        playSessionId: "ps-1",
+        sessionId: "ps-1",
         itemId: "item-1",
         positionTicks: 10,
         watchedMs: 1_000,
@@ -149,7 +149,7 @@ describe("playback repositories", () => {
   it("returns null when touching a session that does not exist", async () => {
     await withTestDatabase(async (db) => {
       const ref = await touchSession(db, {
-        playSessionId: "missing",
+        sessionId: "missing",
         itemId: "item-1",
         positionTicks: 10,
         watchedMs: 1_000,
@@ -161,12 +161,98 @@ describe("playback repositories", () => {
     });
   });
 
+  it("returns null and changes nothing when the only matching row is already closed", async () => {
+    await withTestDatabase(async (db) => {
+      await openSession(db, OPEN);
+      await closeSession(db, {
+        sessionId: "ps-1",
+        itemId: "item-1",
+        positionTicks: 95,
+        runtimeTicks: 100,
+        watchedMs: 1_000,
+        completionThreshold: 0.9,
+        at: new Date(START.getTime() + 60_000),
+      });
+
+      // Only a closed row exists for this identity. Before the fix, touchSession
+      // filtered on identity alone and would have matched — and mutated — it.
+      const touched = await touchSession(db, {
+        sessionId: "ps-1",
+        itemId: "item-1",
+        positionTicks: 999,
+        watchedMs: 5_000,
+        isPaused: true,
+        at: new Date(START.getTime() + 120_000),
+      });
+
+      expect(touched).toBeNull();
+
+      const rows = await db.select().from(playbackSessions);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ watchMs: 1_000, positionTicks: 95, isPaused: false });
+    });
+  });
+
+  it("opens a second row for a re-watch of the same session and item after the first closed", async () => {
+    await withTestDatabase(async (db) => {
+      await openSession(db, OPEN);
+      await closeSession(db, {
+        sessionId: "ps-1",
+        itemId: "item-1",
+        positionTicks: 95,
+        runtimeTicks: 100,
+        watchedMs: 1_000,
+        completionThreshold: 0.9,
+        at: new Date(START.getTime() + 60_000),
+      });
+
+      // Jellyfin reuses the client's session id across items, so re-watching the same
+      // item later in the same browser session produces the identical (sessionId,
+      // itemId) pair that was just closed. Before the fix, the plain unique index made
+      // this collide with the completed row and openSession silently no-opped.
+      const rewatchAt = new Date(START.getTime() + 120_000);
+      await openSession(db, { ...OPEN, at: rewatchAt });
+
+      const rows = await db
+        .select()
+        .from(playbackSessions)
+        .orderBy(playbackSessions.startedAt);
+
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toMatchObject({ watchMs: 1_000, positionTicks: 95 });
+      expect(rows[0]?.endedAt).not.toBeNull();
+      expect(rows[1]).toMatchObject({ startedAt: rewatchAt, watchMs: 0 });
+      expect(rows[1]?.endedAt).toBeNull();
+
+      const touched = await touchSession(db, {
+        sessionId: "ps-1",
+        itemId: "item-1",
+        positionTicks: 10,
+        watchedMs: 2_000,
+        isPaused: false,
+        at: new Date(rewatchAt.getTime() + 5_000),
+      });
+
+      expect(touched).toEqual({ userId: "user-1", itemId: "item-1", startedAt: rewatchAt });
+
+      const afterTouch = await db
+        .select()
+        .from(playbackSessions)
+        .orderBy(playbackSessions.startedAt);
+
+      // The watch time landed on the new open row, and the closed row from the first
+      // viewing was left exactly as it was.
+      expect(afterTouch[0]?.watchMs).toBe(1_000);
+      expect(afterTouch[1]?.watchMs).toBe(2_000);
+    });
+  });
+
   it("returns the row when closing, so the play can be counted without the live payload", async () => {
     await withTestDatabase(async (db) => {
       await openSession(db, OPEN);
 
       const ref = await closeSession(db, {
-        playSessionId: "ps-1",
+        sessionId: "ps-1",
         itemId: "item-1",
         positionTicks: 95,
         runtimeTicks: 100,
@@ -183,7 +269,7 @@ describe("playback repositories", () => {
     await withTestDatabase(async (db) => {
       await openSession(db, OPEN);
       const close = {
-        playSessionId: "ps-1",
+        sessionId: "ps-1",
         itemId: "item-1",
         positionTicks: 95,
         runtimeTicks: 100,
@@ -203,12 +289,12 @@ describe("playback repositories", () => {
   it("finds only open sessions older than the cutoff", async () => {
     await withTestDatabase(async (db) => {
       await openSession(db, OPEN);
-      await openSession(db, { ...OPEN, playSessionId: "ps-2", itemId: "item-2", at: new Date(START.getTime() + 60_000) });
+      await openSession(db, { ...OPEN, sessionId: "ps-2", itemId: "item-2", at: new Date(START.getTime() + 60_000) });
 
       const stale = await findStaleOpenSessions(db, new Date(START.getTime() + 30_000));
 
       expect(stale).toHaveLength(1);
-      expect(stale[0]).toMatchObject({ playSessionId: "ps-1", itemId: "item-1" });
+      expect(stale[0]).toMatchObject({ sessionId: "ps-1", itemId: "item-1" });
     });
   });
 
@@ -229,8 +315,8 @@ describe("playback repositories", () => {
     await withTestDatabase(async (db) => {
       // Two real sessions on the same day for the same user and item.
       await db.insert(playbackSessions).values([
-        { playSessionId: "ps-1", itemId: "item-1", userId: "user-1", startedAt: START, lastSeenAt: START, endedAt: new Date(START.getTime() + 60_000), watchMs: 6_000 },
-        { playSessionId: "ps-2", itemId: "item-1", userId: "user-1", startedAt: START, lastSeenAt: START, endedAt: new Date(START.getTime() + 120_000), watchMs: 4_000 },
+        { sessionId: "ps-1", itemId: "item-1", userId: "user-1", startedAt: START, lastSeenAt: START, endedAt: new Date(START.getTime() + 60_000), watchMs: 6_000 },
+        { sessionId: "ps-2", itemId: "item-1", userId: "user-1", startedAt: START, lastSeenAt: START, endedAt: new Date(START.getTime() + 120_000), watchMs: 4_000 },
       ]);
       // A drifted rollup row, as if an incremental write had been lost.
       await applyRollupDelta(db, { day: "2026-08-16", userId: "user-1", itemId: "item-1", libraryId: null, playCount: 1, watchMs: 999 });
@@ -266,7 +352,7 @@ describe("playback repositories", () => {
 
       await db.insert(playbackSessions).values([
         {
-          playSessionId: "d1-1",
+          sessionId: "d1-1",
           itemId: "item-1",
           userId: "user-1",
           startedAt: day1Start,
@@ -275,7 +361,7 @@ describe("playback repositories", () => {
           watchMs: 1_000,
         },
         {
-          playSessionId: "d1-2",
+          sessionId: "d1-2",
           itemId: "item-1",
           userId: "user-1",
           startedAt: day1Second,
@@ -284,7 +370,7 @@ describe("playback repositories", () => {
           watchMs: 2_000,
         },
         {
-          playSessionId: "d2-1",
+          sessionId: "d2-1",
           itemId: "item-1",
           userId: "user-1",
           startedAt: day2Start,

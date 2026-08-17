@@ -26,10 +26,10 @@ describe("schema", () => {
     });
   });
 
-  it("rejects a duplicate play session and item pair", async () => {
+  it("rejects a duplicate open session and item pair", async () => {
     await withTestDatabase(async (db) => {
       const row = {
-        playSessionId: "ps-1",
+        sessionId: "ps-1",
         userId: "user-1",
         itemId: "item-1",
         startedAt: new Date(),
@@ -45,10 +45,10 @@ describe("schema", () => {
     });
   });
 
-  it("allows the same play session id with a different item", async () => {
+  it("allows the same session id with a different item", async () => {
     await withTestDatabase(async (db) => {
       const base = {
-        playSessionId: "ps-1",
+        sessionId: "ps-1",
         userId: "user-1",
         startedAt: new Date(),
         lastSeenAt: new Date(),

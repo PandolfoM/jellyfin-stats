@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
@@ -62,7 +63,10 @@ export const playbackSessions = pgTable(
   "playback_sessions",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    playSessionId: text("play_session_id").notNull(),
+    // Jellyfin's session Id: the identifier for the client connection, stable across
+    // items played on it for the connection's lifetime. Not a "play session id" —
+    // Jellyfin 10.11.11's /Sessions response has no such field.
+    sessionId: text("session_id").notNull(),
     userId: text("user_id").notNull(),
     itemId: text("item_id").notNull(),
     deviceId: text("device_id"),
@@ -79,8 +83,15 @@ export const playbackSessions = pgTable(
   },
   (table) => [
     // The idempotency guarantee: a replayed poll updates this row instead of
-    // inserting a phantom second stream.
-    uniqueIndex("playback_sessions_identity_uniq").on(table.playSessionId, table.itemId),
+    // inserting a phantom second stream. Scoped to OPEN rows only (partial index) —
+    // a Jellyfin session id is stable across items for the life of a client
+    // connection, so re-watching the same item later in the same browser session
+    // reuses (session_id, item_id). A plain unique index would collide with the
+    // earlier, now-completed row and the replay would never open a new one. Once a
+    // row is ended it drops out of this index and stops constraining anything.
+    uniqueIndex("playback_sessions_identity_uniq")
+      .on(table.sessionId, table.itemId)
+      .where(sql`${table.endedAt} is null`),
     index("playback_sessions_open_idx").on(table.endedAt),
     index("playback_sessions_user_started_idx").on(table.userId, table.startedAt),
     index("playback_sessions_item_started_idx").on(table.itemId, table.startedAt),

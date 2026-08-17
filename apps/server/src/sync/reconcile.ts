@@ -25,7 +25,7 @@ export async function reconcileOpenSessions(deps: ReconcileDeps): Promise<number
 
   for (const session of stale) {
     await deps.closeSession(deps.db, {
-      playSessionId: session.playSessionId,
+      sessionId: session.sessionId,
       itemId: session.itemId,
       positionTicks: session.positionTicks,
       // Runtime is unknown here, so the session is never marked complete by

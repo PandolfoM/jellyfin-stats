@@ -22,13 +22,13 @@ export interface ApplierDeps {
 }
 
 /**
- * Splits `${playSessionId}:${itemId}` back into its parts. Splitting on the *last*
+ * Splits `${sessionId}:${itemId}` back into its parts. Splitting on the *last*
  * colon only inverts `snapshotKey` correctly because Jellyfin item ids never contain
- * a colon; a playSessionId containing one is still handled correctly this way.
+ * a colon; a sessionId containing one is still handled correctly this way.
  */
-function parseKey(key: string): { playSessionId: string; itemId: string } {
+function parseKey(key: string): { sessionId: string; itemId: string } {
   const separator = key.lastIndexOf(":");
-  return { playSessionId: key.slice(0, separator), itemId: key.slice(separator + 1) };
+  return { sessionId: key.slice(0, separator), itemId: key.slice(separator + 1) };
 }
 
 function utcDay(epochMs: number): string {
@@ -41,7 +41,7 @@ export async function applyEvents(
   liveByKey: Map<string, LiveSession>,
 ): Promise<void> {
   for (const event of events) {
-    const { playSessionId, itemId } = parseKey(event.key);
+    const { sessionId, itemId } = parseKey(event.key);
     const live = liveByKey.get(event.key);
     const at = new Date(event.at);
 
@@ -54,7 +54,7 @@ export async function applyEvents(
           lastSeenAt: at,
         });
         await deps.openSession(deps.db, {
-          playSessionId,
+          sessionId,
           itemId,
           userId: event.session.userId,
           deviceId: event.session.deviceId,
@@ -70,7 +70,7 @@ export async function applyEvents(
 
       case "resumed": {
         await deps.touchSession(deps.db, {
-          playSessionId,
+          sessionId,
           itemId,
           positionTicks: event.positionTicks,
           watchedMs: 0,
@@ -83,7 +83,7 @@ export async function applyEvents(
       case "progressed":
       case "paused": {
         const touched = await deps.touchSession(deps.db, {
-          playSessionId,
+          sessionId,
           itemId,
           positionTicks: event.positionTicks,
           watchedMs: event.watchedMs,
@@ -109,7 +109,7 @@ export async function applyEvents(
 
       case "ended": {
         const closed = await deps.closeSession(deps.db, {
-          playSessionId,
+          sessionId,
           itemId,
           positionTicks: event.positionTicks,
           // The stream is usually already absent from the payload by the time it ends,
@@ -164,7 +164,7 @@ export async function runSessionPoll(deps: PollDeps): Promise<void> {
   });
 
   const liveByKey = new Map(
-    incoming.map((session) => [snapshotKey(session.playSessionId, session.itemId), session]),
+    incoming.map((session) => [snapshotKey(session.sessionId, session.itemId), session]),
   );
 
   await applyEvents(deps, events, liveByKey);

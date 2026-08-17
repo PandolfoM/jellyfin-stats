@@ -3,7 +3,7 @@ import type { Db } from "../client.js";
 import { items, playbackRollupDaily, playbackSessions } from "../schema.js";
 
 export interface OpenSessionInput {
-  playSessionId: string;
+  sessionId: string;
   itemId: string;
   userId: string;
   deviceId: string | null;
@@ -15,7 +15,7 @@ export interface OpenSessionInput {
 }
 
 export interface TouchSessionInput {
-  playSessionId: string;
+  sessionId: string;
   itemId: string;
   positionTicks: number;
   watchedMs: number;
@@ -24,7 +24,7 @@ export interface TouchSessionInput {
 }
 
 export interface CloseSessionInput {
-  playSessionId: string;
+  sessionId: string;
   itemId: string;
   positionTicks: number;
   runtimeTicks: number | null;
@@ -34,7 +34,7 @@ export interface CloseSessionInput {
 }
 
 export interface StaleSession {
-  playSessionId: string;
+  sessionId: string;
   itemId: string;
   userId: string;
   positionTicks: number;
@@ -71,7 +71,7 @@ export async function openSession(db: Db, input: OpenSessionInput): Promise<void
   await db
     .insert(playbackSessions)
     .values({
-      playSessionId: input.playSessionId,
+      sessionId: input.sessionId,
       itemId: input.itemId,
       userId: input.userId,
       deviceId: input.deviceId,
@@ -83,8 +83,12 @@ export async function openSession(db: Db, input: OpenSessionInput): Promise<void
       lastSeenAt: input.at,
     })
     // A replayed poll must not create a second row, and must not reset watch time.
+    // The conflict target matches the partial unique index (open rows only), so a
+    // re-watch of the same (sessionId, itemId) after the earlier row closed misses
+    // this conflict entirely and inserts a fresh open row instead.
     .onConflictDoUpdate({
-      target: [playbackSessions.playSessionId, playbackSessions.itemId],
+      target: [playbackSessions.sessionId, playbackSessions.itemId],
+      targetWhere: sql`${playbackSessions.endedAt} is null`,
       set: { lastSeenAt: input.at },
     });
 }
@@ -103,8 +107,12 @@ export async function touchSession(
     })
     .where(
       and(
-        eq(playbackSessions.playSessionId, input.playSessionId),
+        eq(playbackSessions.sessionId, input.sessionId),
         eq(playbackSessions.itemId, input.itemId),
+        // Only the OPEN row for this identity may be touched. Without this, a
+        // re-watch of the same (sessionId, itemId) would add its watch time onto the
+        // earlier, already-closed historical row instead of the new open one.
+        isNull(playbackSessions.endedAt),
       ),
     )
     .returning(ROW_REF);
@@ -134,7 +142,7 @@ export async function closeSession(
     })
     .where(
       and(
-        eq(playbackSessions.playSessionId, input.playSessionId),
+        eq(playbackSessions.sessionId, input.sessionId),
         eq(playbackSessions.itemId, input.itemId),
         // Only an open session closes. A replayed close returns null rather than
         // counting the play a second time.
@@ -149,7 +157,7 @@ export async function closeSession(
 export async function findStaleOpenSessions(db: Db, olderThan: Date): Promise<StaleSession[]> {
   return db
     .select({
-      playSessionId: playbackSessions.playSessionId,
+      sessionId: playbackSessions.sessionId,
       itemId: playbackSessions.itemId,
       userId: playbackSessions.userId,
       positionTicks: playbackSessions.positionTicks,

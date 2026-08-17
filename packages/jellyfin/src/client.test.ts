@@ -66,7 +66,7 @@ describe("createJellyfinClient", () => {
 
     expect(sessions).toHaveLength(1);
     expect(sessions[0]).toEqual({
-      playSessionId: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      sessionId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       userId: "11111111111111111111111111111111",
       userName: "test-user-one",
       itemId: "22222222222222222222222222222222",
@@ -80,6 +80,39 @@ describe("createJellyfinClient", () => {
       isPaused: false,
       remoteEndpoint: "192.0.2.10",
     });
+  });
+
+  it("maps a session with no PlaySessionId key at all, keyed by its Id", async () => {
+    // Shaped exactly like a real Jellyfin 10.11.11 /Sessions response: PlaySessionId
+    // is not a key on the object at all (not null, not undefined — absent), because
+    // that field does not exist on that server version's payload.
+    const raw = JSON.parse(`[
+      {
+        "Id": "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
+        "UserId": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "UserName": "real-server-user",
+        "DeviceId": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "DeviceName": "Real Server Device",
+        "Client": "Jellyfin Web",
+        "RemoteEndPoint": "192.0.2.20",
+        "PlayState": { "PositionTicks": 3000000, "IsPaused": false, "PlayMethod": "DirectPlay" },
+        "NowPlayingItem": {
+          "Id": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+          "Name": "Real Server Episode",
+          "Type": "Episode",
+          "SeriesId": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4",
+          "SeasonId": "e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5",
+          "RunTimeTicks": 12000000000
+        }
+      }
+    ]`) as unknown[];
+    expect(Object.prototype.hasOwnProperty.call(raw[0], "PlaySessionId")).toBe(false);
+
+    const { client } = clientWith(raw);
+    const sessions = await client.getSessions();
+
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]?.sessionId).toBe("f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0");
   });
 
   it("drops sessions with no now-playing item", async () => {

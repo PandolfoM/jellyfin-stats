@@ -2,7 +2,12 @@ export type PlayMethod = "DirectPlay" | "DirectStream" | "Transcode";
 
 /** One currently-playing stream as reported by Jellyfin's /Sessions endpoint. */
 export interface LiveSession {
-  playSessionId: string;
+  /**
+   * Jellyfin's session `Id` — the identifier for the client connection, stable across
+   * items played on it. Not `PlaySessionId`: 10.11.11's /Sessions response does not
+   * include that field at all.
+   */
+  sessionId: string;
   userId: string;
   userName: string;
   itemId: string;
@@ -23,7 +28,7 @@ export interface LiveSession {
  * a cache, and Postgres remains the source of truth if it is lost.
  */
 export interface SessionSnapshotEntry {
-  playSessionId: string;
+  sessionId: string;
   itemId: string;
   positionTicks: number;
   isPaused: boolean;
@@ -31,7 +36,7 @@ export interface SessionSnapshotEntry {
   observedAt: number;
 }
 
-/** Keyed by `${playSessionId}:${itemId}` — see snapshotKey() in Task 4. */
+/** Keyed by `${sessionId}:${itemId}` — see snapshotKey() in Task 4. */
 export type SessionSnapshot = Record<string, SessionSnapshotEntry>;
 
 export type SessionEvent =

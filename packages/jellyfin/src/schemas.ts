@@ -14,7 +14,10 @@ const nowPlayingItemSchema = z.object({
 });
 
 export const sessionSchema = z.object({
-  PlaySessionId: z.string().nullish(),
+  // The session's own identifier, stable across items played on the same client
+  // connection. Jellyfin 10.11.11's /Sessions response does not send a
+  // "PlaySessionId" field at all — this Id is the only usable session identity.
+  Id: z.string().nullish(),
   UserId: z.string().nullish(),
   UserName: z.string().nullish(),
   DeviceId: z.string().nullish(),

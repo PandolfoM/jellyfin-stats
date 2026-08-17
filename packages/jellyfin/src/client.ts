@@ -81,11 +81,11 @@ export function createJellyfinClient(options: JellyfinClientOptions): JellyfinCl
     return raw.flatMap((entry): LiveSession[] => {
       const item = entry.NowPlayingItem;
       // Idle sessions and sessions missing playback identity carry no history.
-      if (!item || !entry.PlaySessionId || !entry.UserId) return [];
+      if (!item || !entry.Id || !entry.UserId) return [];
 
       return [
         {
-          playSessionId: entry.PlaySessionId,
+          sessionId: entry.Id,
           userId: entry.UserId,
           userName: entry.UserName ?? "unknown",
           itemId: item.Id,

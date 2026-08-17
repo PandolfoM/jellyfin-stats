@@ -13,11 +13,11 @@ export interface DiffResult {
 }
 
 /**
- * Jellyfin reuses a PlaySessionId across an auto-played next episode, so the item
+ * Jellyfin reuses a session Id across an auto-played next episode, so the item
  * id is part of the identity. Without it, two episodes would merge into one row.
  */
-export function snapshotKey(playSessionId: string, itemId: string): string {
-  return `${playSessionId}:${itemId}`;
+export function snapshotKey(sessionId: string, itemId: string): string {
+  return `${sessionId}:${itemId}`;
 }
 
 /**
@@ -44,9 +44,9 @@ export function diffSessions(
   for (const live of incoming) {
     // Jellyfin occasionally reports a session with no playback identity; it carries
     // no usable history, so it is dropped rather than stored under an empty key.
-    if (live.playSessionId === "" || live.itemId === "") continue;
+    if (live.sessionId === "" || live.itemId === "") continue;
 
-    const key = snapshotKey(live.playSessionId, live.itemId);
+    const key = snapshotKey(live.sessionId, live.itemId);
     seen.add(key);
 
     const before = previous[key];
@@ -74,7 +74,7 @@ export function diffSessions(
     }
 
     snapshot[key] = {
-      playSessionId: live.playSessionId,
+      sessionId: live.sessionId,
       itemId: live.itemId,
       positionTicks: live.positionTicks,
       isPaused: live.isPaused,
