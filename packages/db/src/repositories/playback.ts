@@ -1,4 +1,4 @@
-import { and, eq, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, isNull, like, lt, sql } from "drizzle-orm";
 import type { Db } from "../client.js";
 import { items, playbackRollupDaily, playbackSessions } from "../schema.js";
 
@@ -281,4 +281,37 @@ export async function recomputeRollupRange(db: Db, from: Date, to: Date): Promis
         ${playbackSessions.itemId}
     `);
   });
+}
+
+/**
+ * Removes playback_sessions rows written by the seed script, identified by its
+ * `session_id` prefix (`seed-`). Real Jellyfin session ids are 32-character hex, which
+ * cannot begin with a letter that isn't a-f followed by non-hex characters the way
+ * `seed-` does, so this can never match live data. Kept here rather than inline in
+ * apps/server/src/seed.ts because a DELETE predicate against a production table is
+ * exactly the kind of thing that should live behind a tested, shared function instead
+ * of being hand-rolled in application code.
+ */
+export async function deleteSeededSessions(db: Db): Promise<number> {
+  const deleted = await db
+    .delete(playbackSessions)
+    .where(like(playbackSessions.sessionId, "seed-%"))
+    .returning({ id: playbackSessions.id });
+
+  return deleted.length;
+}
+
+/**
+ * Removes playback_rollup_daily rows written by the seed script, identified by its
+ * `user_id` prefix (`seed-user-`). Same rationale as deleteSeededSessions: a delete
+ * predicate against production data belongs behind a tested repository function, not
+ * inline in a script.
+ */
+export async function deleteSeededRollupRows(db: Db): Promise<number> {
+  const deleted = await db
+    .delete(playbackRollupDaily)
+    .where(like(playbackRollupDaily.userId, "seed-user-%"))
+    .returning({ day: playbackRollupDaily.day });
+
+  return deleted.length;
 }

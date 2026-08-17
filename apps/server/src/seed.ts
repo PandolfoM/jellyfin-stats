@@ -1,6 +1,7 @@
 import {
   createDb,
-  playbackRollupDaily,
+  deleteSeededRollupRows,
+  deleteSeededSessions,
   playbackSessions,
   recomputeRollupRange,
   upsertItems,
@@ -8,7 +9,6 @@ import {
   upsertUsers,
 } from "@jfstats/db";
 import { loadEnv } from "@jfstats/shared";
-import { like } from "drizzle-orm";
 
 export interface SeedOptions {
   days: number;
@@ -147,19 +147,14 @@ async function main(): Promise<void> {
     // the schema's partial identity index (open rows only) and onConflictDoNothing
     // would never fire — a second run would just double every row. Deleting this
     // script's own prior output first, scoped strictly to seed-prefixed
-    // identifiers, is what makes re-running safe. This must never touch the real
-    // data synced from a live Jellyfin server, so the WHERE clauses match only the
-    // "seed-" / "seed-user-" prefixes this script itself writes.
-    const removedSessions = await db
-      .delete(playbackSessions)
-      .where(like(playbackSessions.sessionId, "seed-%"))
-      .returning({ id: playbackSessions.id });
-    const removedRollup = await db
-      .delete(playbackRollupDaily)
-      .where(like(playbackRollupDaily.userId, "seed-user-%"))
-      .returning({ day: playbackRollupDaily.day });
+    // identifiers, is what makes re-running safe. The delete predicates themselves
+    // live in @jfstats/db (deleteSeededSessions / deleteSeededRollupRows) rather
+    // than being hand-rolled here — a DELETE against production tables belongs
+    // behind a tested, shared function, not inline in a script.
+    const removedSessions = await deleteSeededSessions(db);
+    const removedRollup = await deleteSeededRollupRows(db);
     console.log(
-      `Removed ${removedSessions.length} previously seeded sessions and ${removedRollup.length} previously seeded rollup rows.`,
+      `Removed ${removedSessions} previously seeded sessions and ${removedRollup} previously seeded rollup rows.`,
     );
 
     // Users, libraries, and items are upserted (keyed on id), so re-running is

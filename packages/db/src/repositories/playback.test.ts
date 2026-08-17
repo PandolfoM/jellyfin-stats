@@ -5,6 +5,8 @@ import { stopTestDatabase, withTestDatabase } from "../testing/harness.js";
 import {
   applyRollupDelta,
   closeSession,
+  deleteSeededRollupRows,
+  deleteSeededSessions,
   findStaleOpenSessions,
   openSession,
   recomputeRollupRange,
@@ -483,6 +485,56 @@ describe("playback repositories", () => {
       const rows = await db.select().from(playbackRollupDaily);
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({ libraryId: "lib-1", playCount: 2, watchMs: 2_000 });
+    });
+  });
+
+  it("deleteSeededSessions removes only seed-prefixed sessions, leaving real ones untouched", async () => {
+    await withTestDatabase(async (db) => {
+      // A realistic Jellyfin session id: 32-character hex, as real Jellyfin issues.
+      const realSessionId = "a656b907eb3a73532e40e44b968d0225";
+
+      await openSession(db, { ...OPEN, sessionId: realSessionId });
+      await openSession(db, { ...OPEN, sessionId: "seed-ps-1", itemId: "item-2" });
+
+      const removed = await deleteSeededSessions(db);
+
+      expect(removed).toBe(1);
+
+      const rows = await db.select().from(playbackSessions);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ sessionId: realSessionId });
+    });
+  });
+
+  it("deleteSeededRollupRows removes only seed-user-prefixed rows, leaving real ones untouched", async () => {
+    await withTestDatabase(async (db) => {
+      // A realistic Jellyfin user id: 32-character hex, as real Jellyfin issues.
+      const realUserId = "3fa07a1cf2b74b6a9c2f6c9c6e9c7a3d";
+
+      await applyRollupDelta(db, {
+        day: "2026-08-16",
+        userId: realUserId,
+        itemId: "item-1",
+        libraryId: null,
+        playCount: 1,
+        watchMs: 1_000,
+      });
+      await applyRollupDelta(db, {
+        day: "2026-08-16",
+        userId: "seed-user-0",
+        itemId: "seed-item-1",
+        libraryId: null,
+        playCount: 1,
+        watchMs: 2_000,
+      });
+
+      const removed = await deleteSeededRollupRows(db);
+
+      expect(removed).toBe(1);
+
+      const rows = await db.select().from(playbackRollupDaily);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ userId: realUserId });
     });
   });
 });
