@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { loadEnv } from "@jfstats/shared";
 import { createApp } from "./api/app.js";
 import { closeContext, createContext } from "./context.js";
+import { createShutdownHandler } from "./shutdown.js";
 
 async function main(): Promise<void> {
   const context = createContext(loadEnv());
@@ -11,15 +12,33 @@ async function main(): Promise<void> {
     context.logger.info({ port: info.port }, "api listening");
   });
 
-  const shutdown = async (): Promise<void> => {
-    context.logger.info("api shutting down");
-    server.close();
-    await closeContext(context);
-    process.exit(0);
-  };
+  // server.close()'s callback fires once in-flight connections have drained, so
+  // sequencing it before closeContext keeps the DB/Redis connections alive for any
+  // request still being served rather than yanking them out from under it.
+  const closeServer = (): Promise<void> =>
+    new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
 
-  process.on("SIGTERM", () => void shutdown());
-  process.on("SIGINT", () => void shutdown());
+  const shutdown = createShutdownHandler({
+    logger: context.logger,
+    exit: process.exit,
+    startMessage: "api shutting down",
+    failureMessage: "api shutdown failed",
+    onShutdown: async () => {
+      await closeServer();
+      await closeContext(context);
+    },
+  });
+
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 }
 
 // Boot when run directly, whether via tsx (src/api.ts) or compiled (dist/api.js).

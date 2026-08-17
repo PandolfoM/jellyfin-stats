@@ -14,6 +14,7 @@ import {
 import { loadEnv } from "@jfstats/shared";
 import { Queue, Worker } from "bullmq";
 import { closeContext, createContext, type AppContext } from "./context.js";
+import { createShutdownHandler } from "./shutdown.js";
 import { runSessionPoll } from "./sync/applier.js";
 import { reconcileOpenSessions } from "./sync/reconcile.js";
 import { runReferenceSync } from "./sync/reference-sync.js";
@@ -159,16 +160,20 @@ async function main(): Promise<void> {
     logger.error({ err: error }, "worker error");
   });
 
-  const shutdown = async (): Promise<void> => {
-    logger.info("worker shutting down");
-    await worker.close();
-    await queue.close();
-    await closeContext(context);
-    process.exit(0);
-  };
+  const shutdown = createShutdownHandler({
+    logger,
+    exit: process.exit,
+    startMessage: "worker shutting down",
+    failureMessage: "worker shutdown failed",
+    onShutdown: async () => {
+      await worker.close();
+      await queue.close();
+      await closeContext(context);
+    },
+  });
 
-  process.on("SIGTERM", () => void shutdown());
-  process.on("SIGINT", () => void shutdown());
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 }
 
 // Only run when invoked directly, so importing this module in tests is side-effect
