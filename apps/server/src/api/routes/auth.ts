@@ -8,7 +8,14 @@ import type { RateLimiter } from "../rate-limit.js";
 
 export const SESSION_COOKIE = "jfstats_session";
 
-export interface AuthDeps {
+/** The subset of config needed to write the session cookie. Shared with the
+ * admin middleware so a session refresh re-issues an identical cookie. */
+export interface SessionCookieConfig {
+  cookieSecure: boolean;
+  sessionTtlHours: number;
+}
+
+export interface AuthDeps extends SessionCookieConfig {
   authenticateByName(username: string, password: string): Promise<{
     userId: string;
     userName: string;
@@ -18,8 +25,6 @@ export interface AuthDeps {
   revokeToken(accessToken: string): Promise<void>;
   sessions: SessionStore;
   rateLimiter: RateLimiter;
-  cookieSecure: boolean;
-  sessionTtlHours: number;
   fallbackAdmin: { username: string; password: string } | null;
   // Off unless a reverse proxy that actually sets X-Forwarded-For sits in
   // front of the app. See resolveClientKey for why this gates the header.
@@ -161,12 +166,21 @@ function resolveClientKey<E extends Env>(c: Context<E>, deps: AuthDeps): string 
   return "unknown";
 }
 
-function writeSessionCookie<E extends Env>(c: Context<E>, id: string, deps: AuthDeps): void {
+/**
+ * Writes the session cookie. Shared by login (fresh cookie) and the admin
+ * middleware (refresh on each authenticated request) so the two can never
+ * drift into writing subtly different cookies for the same session.
+ */
+export function writeSessionCookie<E extends Env>(
+  c: Context<E>,
+  id: string,
+  config: SessionCookieConfig,
+): void {
   setCookie(c, SESSION_COOKIE, id, {
     httpOnly: true,
     sameSite: "Lax",
-    secure: deps.cookieSecure,
+    secure: config.cookieSecure,
     path: "/",
-    maxAge: deps.sessionTtlHours * 60 * 60,
+    maxAge: config.sessionTtlHours * 60 * 60,
   });
 }

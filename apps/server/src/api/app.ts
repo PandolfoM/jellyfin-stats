@@ -2,11 +2,12 @@ import { Hono } from "hono";
 import type { AppContext } from "../context.js";
 import { createRateLimiter } from "./rate-limit.js";
 import { registerAuthRoutes } from "./routes/auth.js";
-import { createSessionStore } from "./sessions.js";
+import { createSessionStore, type SessionRecord } from "./sessions.js";
 
-/** Populated by the auth middleware in Task 5. */
+/** Populated by requireAdmin (see middleware/auth.ts) once a request's
+ * session has been resolved and re-checked for admin access. */
 export interface AppVariables {
-  session: unknown;
+  session: SessionRecord;
 }
 
 export function createApp(context: AppContext) {
