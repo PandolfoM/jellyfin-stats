@@ -5,6 +5,10 @@
   "type": "module",
   "scripts": { "build": "tsc --build" },
   "dependencies": {
-    "@jfstats/shared": "workspace:*"
+    "@jfstats/db": "workspace:*",
+    "@jfstats/jellyfin": "workspace:*",
+    "@jfstats/shared": "workspace:*",
+    "bullmq": "^5.34.2",
+    "ioredis": "^5.4.2"
   }
 }
