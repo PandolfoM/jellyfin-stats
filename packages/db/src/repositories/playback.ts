@@ -262,6 +262,17 @@ export async function recomputeRollupRange(db: Db, from: Date, to: Date): Promis
     // A bare timestamp comparison (rather than casting started_at to a date) lets this
     // use the user/item + started_at indexes instead of forcing a scan. The normalized
     // fromDayStart/toDayStart bounds make it cover exactly the same days as the DELETE.
+    //
+    // play_count counts only sessions that have ended, matching the incremental path:
+    // the applier counts a play solely in its `ended` branch, gated on closeSession
+    // returning a row. An unfiltered count(*) counted still-open rows too, so a stream
+    // running across the nightly job (started 23:30, or any session spanning UTC
+    // midnight) was written as a play by the recompute and then again by the applier
+    // when it finally stopped — double-counted until the next night's rebuild.
+    //
+    // sum(watch_ms) is deliberately NOT filtered the same way: an open row's accrued
+    // watch time is real observed playback that the incremental path has already
+    // written, so excluding it would break the agreement in the other direction.
     await tx.execute(sql`
       INSERT INTO ${playbackRollupDaily} (day, user_id, item_id, library_id, play_count, watch_ms)
       SELECT
@@ -269,7 +280,7 @@ export async function recomputeRollupRange(db: Db, from: Date, to: Date): Promis
         ${playbackSessions.userId},
         ${playbackSessions.itemId},
         max(${items.libraryId}) AS library_id,
-        count(*)::int AS play_count,
+        count(*) FILTER (WHERE ${playbackSessions.endedAt} IS NOT NULL)::int AS play_count,
         coalesce(sum(${playbackSessions.watchMs}), 0) AS watch_ms
       FROM ${playbackSessions}
       LEFT JOIN ${items} ON ${items.id} = ${playbackSessions.itemId}

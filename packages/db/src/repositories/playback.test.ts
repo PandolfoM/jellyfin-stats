@@ -349,6 +349,84 @@ describe("playback repositories", () => {
     });
   });
 
+  it("does not count a still-open session as a play, but still counts its watch time", async () => {
+    await withTestDatabase(async (db) => {
+      // A stream that started late on the 16th and is still running when the nightly
+      // recompute fires during the 17th. The incremental path has already written the
+      // accrued watch time and no play — the applier counts a play only in its `ended`
+      // branch — so the recompute must reach the same numbers.
+      const startedAt = new Date("2026-08-16T23:30:00Z");
+      await db.insert(playbackSessions).values({
+        sessionId: "ps-open",
+        itemId: "item-1",
+        userId: "user-1",
+        startedAt,
+        lastSeenAt: new Date("2026-08-17T00:30:00Z"),
+        endedAt: null,
+        watchMs: 3_600_000,
+      });
+      await applyRollupDelta(db, {
+        day: "2026-08-16",
+        userId: "user-1",
+        itemId: "item-1",
+        libraryId: null,
+        playCount: 0,
+        watchMs: 3_600_000,
+      });
+
+      const incremental = await db.select().from(playbackRollupDaily);
+      expect(incremental).toHaveLength(1);
+      expect(incremental[0]).toMatchObject({ playCount: 0, watchMs: 3_600_000 });
+
+      await recomputeRollupRange(db, new Date("2026-08-16T00:00:00Z"), new Date("2026-08-18T00:00:00Z"));
+
+      const recomputed = await db.select().from(playbackRollupDaily);
+      expect(recomputed).toHaveLength(1);
+      // Counting an open row as a play is what made the recompute disagree: it wrote
+      // play_count 1, then the applier's own `ended` write added a second one when the
+      // stream finally stopped, double-counting the play until the next night's rebuild.
+      expect(recomputed[0]).toMatchObject({
+        day: "2026-08-16",
+        playCount: incremental[0]?.playCount,
+        watchMs: incremental[0]?.watchMs,
+      });
+      expect(recomputed[0]).toMatchObject({ playCount: 0, watchMs: 3_600_000 });
+    });
+  });
+
+  it("counts the ended sessions of a day and not the open one alongside them", async () => {
+    await withTestDatabase(async (db) => {
+      const day = "2026-08-16";
+      await db.insert(playbackSessions).values([
+        {
+          sessionId: "ps-done",
+          itemId: "item-1",
+          userId: "user-1",
+          startedAt: new Date("2026-08-16T10:00:00Z"),
+          lastSeenAt: new Date("2026-08-16T10:30:00Z"),
+          endedAt: new Date("2026-08-16T10:30:00Z"),
+          watchMs: 1_800_000,
+        },
+        {
+          sessionId: "ps-still-going",
+          itemId: "item-1",
+          userId: "user-1",
+          startedAt: new Date("2026-08-16T23:30:00Z"),
+          lastSeenAt: new Date("2026-08-17T00:30:00Z"),
+          endedAt: null,
+          watchMs: 600_000,
+        },
+      ]);
+
+      await recomputeRollupRange(db, new Date("2026-08-16T00:00:00Z"), new Date("2026-08-18T00:00:00Z"));
+
+      const rows = await db.select().from(playbackRollupDaily);
+      expect(rows).toHaveLength(1);
+      // One finished play; both rows' accrued watch time.
+      expect(rows[0]).toMatchObject({ day, playCount: 1, watchMs: 2_400_000 });
+    });
+  });
+
   it("removes rollup rows in range that no longer have sessions", async () => {
     await withTestDatabase(async (db) => {
       await applyRollupDelta(db, { day: "2026-08-16", userId: "ghost", itemId: "item-x", libraryId: null, playCount: 3, watchMs: 300 });
