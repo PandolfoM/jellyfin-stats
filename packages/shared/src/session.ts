@@ -41,7 +41,21 @@ export type SessionSnapshot = Record<string, SessionSnapshotEntry>;
 
 export type SessionEvent =
   | { type: "started"; key: string; session: LiveSession; at: number }
-  | { type: "progressed"; key: string; positionTicks: number; watchedMs: number; at: number }
-  | { type: "paused"; key: string; positionTicks: number; watchedMs: number; at: number }
+  | {
+      type: "progressed";
+      key: string;
+      positionTicks: number;
+      watchedMs: number;
+      isPaused: boolean;
+      at: number;
+    }
+  | {
+      type: "paused";
+      key: string;
+      positionTicks: number;
+      watchedMs: number;
+      isPaused: boolean;
+      at: number;
+    }
   | { type: "resumed"; key: string; positionTicks: number; at: number }
   | { type: "ended"; key: string; positionTicks: number; watchedMs: number; at: number };

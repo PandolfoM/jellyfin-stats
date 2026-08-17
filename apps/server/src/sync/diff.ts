@@ -61,6 +61,7 @@ export function diffSessions(
         key,
         positionTicks: live.positionTicks,
         watchedMs: creditFor(before, options),
+        isPaused: live.isPaused,
         at: options.now,
       });
     } else {
@@ -69,6 +70,7 @@ export function diffSessions(
         key,
         positionTicks: live.positionTicks,
         watchedMs: creditFor(before, options),
+        isPaused: live.isPaused,
         at: options.now,
       });
     }

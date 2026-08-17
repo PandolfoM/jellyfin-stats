@@ -1,6 +1,6 @@
 ﻿import { and, eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { playbackRollupDaily, playbackSessions } from "../schema.js";
+import { items, playbackRollupDaily, playbackSessions } from "../schema.js";
 import { stopTestDatabase, withTestDatabase } from "../testing/harness.js";
 import {
   applyRollupDelta,
@@ -423,6 +423,27 @@ describe("playback repositories", () => {
 
       const rows = await db.select().from(playbackRollupDaily);
       expect(rows).toEqual([]);
+    });
+  });
+
+  it("resolves library_id from the items table when the caller doesn't supply one", async () => {
+    await withTestDatabase(async (db) => {
+      await db.insert(items).values({ id: "item-1", libraryId: "lib-1", type: "Movie", name: "The Movie" });
+
+      // No libraryId passed at all — this is how the applier calls it. Before the fix,
+      // the applier had no way to know the item's library and always passed null,
+      // leaving playback_rollup_daily.library_id NULL until the nightly recompute ran.
+      await applyRollupDelta(db, {
+        day: "2026-08-16",
+        userId: "user-1",
+        itemId: "item-1",
+        playCount: 1,
+        watchMs: 5_000,
+      });
+
+      const rows = await db.select().from(playbackRollupDaily);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ libraryId: "lib-1" });
     });
   });
 

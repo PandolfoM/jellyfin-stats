@@ -73,7 +73,7 @@ describe("applyEvents", () => {
 
     await applyEvents(
       d,
-      [{ type: "progressed", key, positionTicks: 50, watchedMs: 5_000, at: AT.getTime() }],
+      [{ type: "progressed", key, positionTicks: 50, watchedMs: 5_000, isPaused: false, at: AT.getTime() }],
       new Map([[key, session]]),
     );
 
@@ -94,7 +94,7 @@ describe("applyEvents", () => {
 
     await applyEvents(
       d,
-      [{ type: "progressed", key, positionTicks: 50, watchedMs: 0, at: AT.getTime() }],
+      [{ type: "progressed", key, positionTicks: 50, watchedMs: 0, isPaused: false, at: AT.getTime() }],
       new Map([[key, session]]),
     );
 
@@ -156,11 +156,29 @@ describe("applyEvents", () => {
 
     await applyEvents(
       d,
-      [{ type: "paused", key, positionTicks: 60, watchedMs: 5_000, at: AT.getTime() }],
+      [{ type: "paused", key, positionTicks: 60, watchedMs: 5_000, isPaused: true, at: AT.getTime() }],
       new Map([[key, session]]),
     );
 
     expect(d.touchSession).toHaveBeenCalledWith(d.db, expect.objectContaining({ isPaused: true, watchedMs: 5_000 }));
+  });
+
+  it("writes isPaused: true for a progressed event on a stream still paused from a prior poll", async () => {
+    // Before the fix, the applier inferred isPaused from the event *type* alone
+    // (`event.type === "paused"`), so a "progressed" event — which is what a still-paused
+    // stream produces on the second and later polls — was always written as isPaused:
+    // false, even though the event itself now carries the real state.
+    const d = deps();
+    const session = live({ isPaused: true });
+    const key = snapshotKey("ps-1", "item-1");
+
+    await applyEvents(
+      d,
+      [{ type: "progressed", key, positionTicks: 60, watchedMs: 0, isPaused: true, at: AT.getTime() }],
+      new Map([[key, session]]),
+    );
+
+    expect(d.touchSession).toHaveBeenCalledWith(d.db, expect.objectContaining({ isPaused: true }));
   });
 
   it("attributes watch time to the session's start day, not the poll day", async () => {
@@ -173,7 +191,7 @@ describe("applyEvents", () => {
 
     await applyEvents(
       d,
-      [{ type: "progressed", key, positionTicks: 50, watchedMs: 5_000, at: afterMidnight }],
+      [{ type: "progressed", key, positionTicks: 50, watchedMs: 5_000, isPaused: false, at: afterMidnight }],
       new Map([[key, session]]),
     );
 

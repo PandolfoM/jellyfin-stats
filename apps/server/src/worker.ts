@@ -53,11 +53,25 @@ async function handle(context: AppContext, name: JobName): Promise<void> {
       return;
 
     case "rollup-recompute": {
-      // Trailing 7 days, per the spec's drift correction.
-      const to = new Date();
+      // Trailing 7 UTC days, ending at today's UTC day start. recomputeRollupRange
+      // floors `from` down and ceils `to` up to UTC day boundaries, so both bounds must
+      // already sit on a day boundary here — otherwise floor+ceil silently add an extra
+      // day to the window regardless of what time the cron fires.
+      const todayUtcStart = new Date(new Date().toISOString().slice(0, 10));
+      const to = todayUtcStart;
       const from = new Date(to.getTime() - 7 * 24 * 60 * 60 * 1000);
       await recomputeRollupRange(context.db, from, to);
       return;
+    }
+
+    default: {
+      // Exhaustiveness guard: if JobName ever gains a variant without a case here,
+      // this assignment fails to compile. Without it, an unrecognized job name would
+      // fall through, handle() would return undefined, and BullMQ would mark the job
+      // completed successfully having done nothing — worse than a loud failure,
+      // because it never reaches the worker's "failed" handler.
+      const _exhaustive: never = name;
+      throw new Error(`Unhandled job name: ${String(_exhaustive)}`);
     }
   }
 }

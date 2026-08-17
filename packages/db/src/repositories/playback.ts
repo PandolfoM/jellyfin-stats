@@ -62,7 +62,17 @@ export interface RollupDelta {
   day: string;
   userId: string;
   itemId: string;
-  libraryId: string | null;
+  /**
+   * Optional override for the rollup row's library_id. Callers normally omit this (or
+   * pass `null`, which is treated the same): applyRollupDelta resolves it itself from
+   * the items table via a subquery, which is the only place that reliably knows an
+   * item's library. Pass a string explicitly only when the caller has better
+   * information than items.libraryId currently holds (there is no such caller today).
+   * Either way, the onConflictDoUpdate coalesce below keeps whatever library id an
+   * earlier delta for the same row already established, so a delta that resolves to
+   * null never blanks out a value a previous delta found.
+   */
+  libraryId?: string | null;
   playCount: number;
   watchMs: number;
 }
@@ -168,14 +178,32 @@ export async function findStaleOpenSessions(db: Db, olderThan: Date): Promise<St
 }
 
 export async function applyRollupDelta(db: Db, input: RollupDelta): Promise<void> {
+  // The applier has no reliable way to know an item's library at write time — items
+  // may not have synced yet, or the write is driven only by the session row. Resolving
+  // it here, from the items table, is what lets the incremental path agree with
+  // recomputeRollupRange (which derives it the same way, via `max(items.library_id)`)
+  // instead of always writing NULL and waiting on the nightly recompute to fill it in.
+  const libraryId =
+    input.libraryId ??
+    sql`(select ${items.libraryId} from ${items} where ${items.id} = ${input.itemId})`;
+
   await db
     .insert(playbackRollupDaily)
-    .values(input)
+    .values({
+      day: input.day,
+      userId: input.userId,
+      itemId: input.itemId,
+      libraryId,
+      playCount: input.playCount,
+      watchMs: input.watchMs,
+    })
     .onConflictDoUpdate({
       target: [playbackRollupDaily.day, playbackRollupDaily.userId, playbackRollupDaily.itemId],
       set: {
         playCount: sql`${playbackRollupDaily.playCount} + ${input.playCount}`,
         watchMs: sql`${playbackRollupDaily.watchMs} + ${input.watchMs}`,
+        // A known library id from an earlier delta must never be overwritten by NULL
+        // from a later one that couldn't resolve it.
         libraryId: sql`coalesce(excluded.library_id, ${playbackRollupDaily.libraryId})`,
       },
     });

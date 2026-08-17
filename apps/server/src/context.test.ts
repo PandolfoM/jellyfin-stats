@@ -41,4 +41,17 @@ describe("logger redaction", () => {
 
     expect(lines.join("")).not.toContain("super-secret-key");
   });
+
+  it("redacts the real Authorization header casing the Jellyfin client sends", () => {
+    // packages/jellyfin/src/client.ts sets `Authorization` (capital A), not
+    // `authorization`. fast-redact (which backs pino's redact option) matches paths
+    // exactly, so a lowercase-only entry silently never fires on the real header
+    // shape — this is the case that was broken.
+    const { logger, lines } = captureLogger();
+
+    logger.info({ headers: { Authorization: 'MediaBrowser Token="super-secret-key"' } }, "request");
+
+    expect(lines.join("")).not.toContain("super-secret-key");
+    expect(lines.join("")).toContain("[redacted]");
+  });
 });

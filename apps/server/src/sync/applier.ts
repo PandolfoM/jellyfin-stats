@@ -87,7 +87,7 @@ export async function applyEvents(
           itemId,
           positionTicks: event.positionTicks,
           watchedMs: event.watchedMs,
-          isPaused: event.type === "paused",
+          isPaused: event.isPaused,
           at,
         });
 
@@ -99,7 +99,7 @@ export async function applyEvents(
             day: utcDay(touched.startedAt.getTime()),
             userId: touched.userId,
             itemId,
-            libraryId: null,
+            // libraryId omitted: applyRollupDelta resolves it from the items table.
             playCount: 0,
             watchMs: event.watchedMs,
           });
@@ -127,7 +127,7 @@ export async function applyEvents(
             day: utcDay(closed.startedAt.getTime()),
             userId: closed.userId,
             itemId,
-            libraryId: null,
+            // libraryId omitted: applyRollupDelta resolves it from the items table.
             playCount: 1,
             watchMs: event.watchedMs,
           });

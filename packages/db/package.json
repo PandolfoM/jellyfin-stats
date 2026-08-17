@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc --build",
     "migrate:generate": "drizzle-kit generate",
-    "migrate:push": "drizzle-kit migrate"
+    "migrate:push": "node --env-file=../../.env node_modules/drizzle-kit/bin.cjs migrate"
   },
   "dependencies": {
     "@jfstats/shared": "workspace:*",

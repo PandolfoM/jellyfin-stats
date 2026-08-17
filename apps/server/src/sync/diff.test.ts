@@ -64,7 +64,7 @@ describe("diffSessions", () => {
     const live = session();
     const { events } = diffSessions(snapshotOf(live), [live], OPTIONS);
 
-    expect(events[0]).toMatchObject({ type: "progressed", watchedMs: 5_000 });
+    expect(events[0]).toMatchObject({ type: "progressed", watchedMs: 5_000, isPaused: false });
   });
 
   it("clamps the credit to maxWatchDeltaMs when the worker stalls", () => {
@@ -95,12 +95,24 @@ describe("diffSessions", () => {
     expect(events[0]).toMatchObject({ type: "progressed", watchedMs: 0 });
   });
 
+  it("still marks a stream isPaused when it is paused on a second consecutive poll", () => {
+    // A stream that was already paused at the previous observation and remains paused
+    // now falls into the "progressed" branch (isPaused was true before and after), not
+    // "paused" (which only fires on the transition). Before the fix, the applier
+    // inferred isPaused from the event *type* alone, so this case — a stream paused for
+    // more than one poll interval — was written to the database as isPaused: false.
+    const live = session({ isPaused: true });
+    const { events } = diffSessions(snapshotOf(live, { isPaused: true }), [live], OPTIONS);
+
+    expect(events[0]).toMatchObject({ type: "progressed", isPaused: true });
+  });
+
   it("emits paused and credits the time played before the pause", () => {
     const previous = session();
     const live = session({ isPaused: true });
     const { events } = diffSessions(snapshotOf(previous, { isPaused: false }), [live], OPTIONS);
 
-    expect(events[0]).toMatchObject({ type: "paused", watchedMs: 5_000 });
+    expect(events[0]).toMatchObject({ type: "paused", watchedMs: 5_000, isPaused: true });
   });
 
   it("emits resumed with no watch time for the paused interval", () => {
@@ -152,7 +164,16 @@ describe("diffSessions", () => {
     const first = diffSessions({}, [live], OPTIONS);
     const second = diffSessions(first.snapshot, [live], OPTIONS);
 
-    expect(second.events).toEqual([{ type: "progressed", key: snapshotKey("ps-1", "item-1"), positionTicks: live.positionTicks, watchedMs: 0, at: OPTIONS.now }]);
+    expect(second.events).toEqual([
+      {
+        type: "progressed",
+        key: snapshotKey("ps-1", "item-1"),
+        positionTicks: live.positionTicks,
+        watchedMs: 0,
+        isPaused: false,
+        at: OPTIONS.now,
+      },
+    ]);
     expect(second.snapshot).toEqual(first.snapshot);
   });
 

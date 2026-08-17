@@ -9,7 +9,17 @@ export function createLogger(level: string, destination?: DestinationStream) {
     level,
     // Never let a Jellyfin key reach the logs, whatever object gets logged.
     redact: {
-      paths: ["apiKey", "JELLYFIN_API_KEY", "SESSION_SECRET", "*.apiKey", "headers.authorization"],
+      // fast-redact matches paths exactly, so the real casing must be listed too:
+      // packages/jellyfin/src/client.ts sends the header as `Authorization`
+      // (MediaBrowser convention), not `authorization`.
+      paths: [
+        "apiKey",
+        "JELLYFIN_API_KEY",
+        "SESSION_SECRET",
+        "*.apiKey",
+        "headers.authorization",
+        "headers.Authorization",
+      ],
       censor: "[redacted]",
     },
   };
