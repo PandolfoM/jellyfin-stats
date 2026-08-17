@@ -1,0 +1,41 @@
+[
+  {
+    "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "UserId": "11111111111111111111111111111111",
+    "UserName": "test-user-one",
+    "DeviceId": "cccccccccccccccccccccccccccccccc",
+    "DeviceName": "Test Device",
+    "Client": "Jellyfin Web",
+    "RemoteEndPoint": "192.0.2.10",
+    "PlayState": { "PositionTicks": 12000000000, "IsPaused": false, "PlayMethod": "DirectPlay" },
+    "NowPlayingItem": {
+      "Id": "22222222222222222222222222222222",
+      "Name": "Test Episode",
+      "Type": "Episode",
+      "SeriesId": "33333333333333333333333333333333",
+      "SeasonId": "44444444444444444444444444444444",
+      "RunTimeTicks": 24000000000,
+      "ProductionYear": 2024,
+      "ImageTags": { "Primary": "abc123" }
+    }
+  },
+  {
+    "Id": "dddddddddddddddddddddddddddddddd",
+    "UserId": "55555555555555555555555555555555",
+    "UserName": "test-user-two",
+    "DeviceId": "ffffffffffffffffffffffffffffffff",
+    "DeviceName": "Test Phone",
+    "Client": "Jellyfin Android",
+    "RemoteEndPoint": "192.0.2.11",
+    "PlayState": { "PositionTicks": 500000000, "IsPaused": true, "PlayMethod": "Transcode" }
+  },
+  {
+    "Id": "99999999999999999999999999999999",
+    "UserId": "55555555555555555555555555555555",
+    "UserName": "test-user-two",
+    "DeviceId": "88888888888888888888888888888888",
+    "DeviceName": "Idle Browser",
+    "Client": "Jellyfin Web",
+    "PlayState": { "PositionTicks": 0, "IsPaused": false }
+  }
+]

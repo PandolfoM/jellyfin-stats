@@ -1,0 +1,4 @@
+[
+  { "Id": "11111111111111111111111111111111", "Name": "test-user-one", "Policy": { "IsAdministrator": true } },
+  { "Id": "55555555555555555555555555555555", "Name": "test-user-two", "Policy": { "IsAdministrator": false } }
+]

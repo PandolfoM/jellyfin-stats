@@ -1,0 +1,12 @@
+{
+  "movies": {
+    "ItemId": "66666666666666666666666666666666",
+    "Name": "Test Movies",
+    "CollectionType": "movies"
+  },
+  "shows": {
+    "ItemId": "77777777777777777777777777777777",
+    "Name": "Test Shows",
+    "CollectionType": "tvshows"
+  }
+}

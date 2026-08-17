@@ -10,6 +10,18 @@
 
 This plan is Plan 1 of 3. Plan 2 adds the HTTP API and authentication; Plan 3 adds the web UI and production image. Spec: [`docs/superpowers/specs/2026-08-16-jellyfin-stats-design.md`](../specs/2026-08-16-jellyfin-stats-design.md).
 
+> **⚠️ Read this before copying any code from this plan.** Live verification against a real
+> Jellyfin 10.11.11 server invalidated several assumptions baked into the task text below.
+> Most importantly: **`/Sessions` returns no `PlaySessionId`** (the field this plan keys
+> streams on does not exist), and **an item's `ParentId` is not its library**. The shipped
+> code renames `playSessionId` → `sessionId` throughout, makes the identity index partial on
+> open rows, and resolves an item's library by querying per library.
+>
+> The spec's **"Verified behavior of the real Jellyfin API"** section is the authority. Where
+> this plan and the committed code disagree, the code is right — read
+> `packages/jellyfin/src/client.ts`, `packages/db/src/schema.ts`, and
+> `packages/db/src/repositories/playback.ts` rather than the snippets here.
+
 ## Global Constraints
 
 - **Node 22 LTS.** `engines.node` is `>=22`. Verified present: v22.14.0.
@@ -1586,13 +1598,23 @@ The write path for playback, and the rollup arithmetic that makes dashboards fas
 - Consumes: `Db`, schema, `withTestDatabase` from Task 5.
 - Produces:
   - `openSession(db, input: OpenSessionInput): Promise<void>`
-  - `touchSession(db, input: TouchSessionInput): Promise<void>`
-  - `closeSession(db, input: CloseSessionInput): Promise<void>`
+  - `touchSession(db, input: TouchSessionInput): Promise<SessionRowRef | null>`
+  - `closeSession(db, input: CloseSessionInput): Promise<SessionRowRef | null>`
   - `findStaleOpenSessions(db, olderThan: Date): Promise<StaleSession[]>`
   - `applyRollupDelta(db, input: RollupDelta): Promise<void>`
   - `recomputeRollupRange(db, from: Date, to: Date): Promise<void>`
+  - `interface SessionRowRef { userId: string; itemId: string; startedAt: Date }`
 
-  Task 8's applier calls the first four; Task 9's nightly job calls `recomputeRollupRange`.
+  Task 9's applier calls the first four; Task 11's nightly job calls `recomputeRollupRange`.
+
+**Why `touchSession` and `closeSession` return the row they touched.** The applier must
+write rollups keyed on the session's **start day** and its user id. Both facts live on the
+row, not in the live payload — and by the time a session ends it is already absent from
+`/Sessions`, so the payload cannot supply them at all. Returning the row via `RETURNING`
+gets both in the write that was happening anyway, and makes the incremental path attribute
+watch time to exactly the day `recomputeRollupRange` groups by. Without this, a session
+spanning midnight would be split across two days incrementally but landed on one day by the
+recompute, and the two paths would silently disagree.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1729,6 +1751,78 @@ describe("playback repositories", () => {
     });
   });
 
+  it("returns the touched row's identity and start time", async () => {
+    await withTestDatabase(async (db) => {
+      await openSession(db, OPEN);
+
+      const ref = await touchSession(db, {
+        playSessionId: "ps-1",
+        itemId: "item-1",
+        positionTicks: 10,
+        watchedMs: 1_000,
+        isPaused: false,
+        at: new Date(START.getTime() + 5_000),
+      });
+
+      // The applier keys rollups on the start day, which only the row knows.
+      expect(ref).toEqual({ userId: "user-1", itemId: "item-1", startedAt: START });
+    });
+  });
+
+  it("returns null when touching a session that does not exist", async () => {
+    await withTestDatabase(async (db) => {
+      const ref = await touchSession(db, {
+        playSessionId: "missing",
+        itemId: "item-1",
+        positionTicks: 10,
+        watchedMs: 1_000,
+        isPaused: false,
+        at: START,
+      });
+
+      expect(ref).toBeNull();
+    });
+  });
+
+  it("returns the row when closing, so the play can be counted without the live payload", async () => {
+    await withTestDatabase(async (db) => {
+      await openSession(db, OPEN);
+
+      const ref = await closeSession(db, {
+        playSessionId: "ps-1",
+        itemId: "item-1",
+        positionTicks: 95,
+        runtimeTicks: 100,
+        watchedMs: 1_000,
+        completionThreshold: 0.9,
+        at: new Date(START.getTime() + 60_000),
+      });
+
+      expect(ref).toEqual({ userId: "user-1", itemId: "item-1", startedAt: START });
+    });
+  });
+
+  it("returns null when closing an already-closed session", async () => {
+    await withTestDatabase(async (db) => {
+      await openSession(db, OPEN);
+      const close = {
+        playSessionId: "ps-1",
+        itemId: "item-1",
+        positionTicks: 95,
+        runtimeTicks: 100,
+        watchedMs: 1_000,
+        completionThreshold: 0.9,
+        at: new Date(START.getTime() + 60_000),
+      };
+
+      await closeSession(db, close);
+      const second = await closeSession(db, close);
+
+      // Null is what stops a replayed close from counting the play twice.
+      expect(second).toBeNull();
+    });
+  });
+
   it("finds only open sessions older than the cutoff", async () => {
     await withTestDatabase(async (db) => {
       await openSession(db, OPEN);
@@ -1843,6 +1937,22 @@ export interface StaleSession {
   lastSeenAt: Date;
 }
 
+/**
+ * Identity of the row a write affected. The applier needs the user and the start day to
+ * write a rollup, and neither is available from the live payload once a stream has ended.
+ */
+export interface SessionRowRef {
+  userId: string;
+  itemId: string;
+  startedAt: Date;
+}
+
+const ROW_REF = {
+  userId: playbackSessions.userId,
+  itemId: playbackSessions.itemId,
+  startedAt: playbackSessions.startedAt,
+} as const;
+
 export interface RollupDelta {
   /** ISO date, `YYYY-MM-DD`. */
   day: string;
@@ -1875,8 +1985,11 @@ export async function openSession(db: Db, input: OpenSessionInput): Promise<void
     });
 }
 
-export async function touchSession(db: Db, input: TouchSessionInput): Promise<void> {
-  await db
+export async function touchSession(
+  db: Db,
+  input: TouchSessionInput,
+): Promise<SessionRowRef | null> {
+  const [row] = await db
     .update(playbackSessions)
     .set({
       positionTicks: input.positionTicks,
@@ -1889,17 +2002,23 @@ export async function touchSession(db: Db, input: TouchSessionInput): Promise<vo
         eq(playbackSessions.playSessionId, input.playSessionId),
         eq(playbackSessions.itemId, input.itemId),
       ),
-    );
+    )
+    .returning(ROW_REF);
+
+  return row ?? null;
 }
 
-export async function closeSession(db: Db, input: CloseSessionInput): Promise<void> {
+export async function closeSession(
+  db: Db,
+  input: CloseSessionInput,
+): Promise<SessionRowRef | null> {
   // An unknown runtime cannot be a completion — never divide by a missing value.
   const completed =
     input.runtimeTicks !== null &&
     input.runtimeTicks > 0 &&
     input.positionTicks / input.runtimeTicks >= input.completionThreshold;
 
-  await db
+  const [row] = await db
     .update(playbackSessions)
     .set({
       positionTicks: input.positionTicks,
@@ -1913,9 +2032,14 @@ export async function closeSession(db: Db, input: CloseSessionInput): Promise<vo
       and(
         eq(playbackSessions.playSessionId, input.playSessionId),
         eq(playbackSessions.itemId, input.itemId),
+        // Only an open session closes. A replayed close returns null rather than
+        // counting the play a second time.
         isNull(playbackSessions.endedAt),
       ),
-    );
+    )
+    .returning(ROW_REF);
+
+  return row ?? null;
 }
 
 export async function findStaleOpenSessions(db: Db, olderThan: Date): Promise<StaleSession[]> {
@@ -1977,6 +2101,22 @@ export async function recomputeRollupRange(db: Db, from: Date, to: Date): Promis
 }
 ```
 
+> **Superseded during implementation — `recomputeRollupRange` above is not the shipped
+> version.** The snippet's DELETE compared `day` against date-strings sliced from the
+> `from`/`to` boundary instants while its INSERT compared raw `started_at` timestamps. Those
+> two agree only for exactly midnight-aligned bounds, and 5 of the 8 call sites in this plan
+> pass non-aligned bounds (Task 11's nightly `new Date()`, Task 12's seed, three Task 13
+> tests) — so it would have thrown a primary-key violation or silently written a partial day.
+>
+> The shipped fix (commit `9fa35a1`) normalizes both bounds to UTC day boundaries once —
+> flooring `from`, ceiling `to` to the next UTC day unless already aligned — and derives the
+> DELETE's day strings and the INSERT's timestamp bounds from those same values, so the two
+> provably cover an identical day set for any input. The range is half-open on **whole UTC
+> days**: any `from`/`to` falling inside a day pulls that entire day into the recompute.
+>
+> Read `packages/db/src/repositories/playback.ts` for the real implementation rather than
+> copying the block above.
+
 - [ ] **Step 4: Export from the package index**
 
 `packages/db/src/index.ts`:
@@ -1994,7 +2134,7 @@ export * from "./repositories/playback.js";
 pnpm vitest run packages/db/src/repositories/playback.test.ts
 ```
 
-Expected: PASS, 10 tests. Pay particular attention to the last two — they are the proof that the nightly recompute genuinely corrects drift rather than compounding it.
+Expected: PASS, 14 tests. Pay particular attention to the last two — they are the proof that the nightly recompute genuinely corrects drift rather than compounding it.
 
 - [ ] **Step 6: Commit**
 
@@ -2618,17 +2758,19 @@ function live(overrides: Partial<LiveSession> = {}): LiveSession {
   };
 }
 
-function deps() {
-  const calls: ApplierDeps = {
+/** The row the database would return for the session under test. */
+const ROW = { userId: "user-1", itemId: "item-1", startedAt: AT };
+
+function deps(row: typeof ROW | null = ROW): ApplierDeps {
+  return {
     db: {} as ApplierDeps["db"],
     completionThreshold: 0.9,
     openSession: vi.fn(async () => {}),
-    touchSession: vi.fn(async () => {}),
-    closeSession: vi.fn(async () => {}),
+    touchSession: vi.fn(async () => row),
+    closeSession: vi.fn(async () => row),
     applyRollupDelta: vi.fn(async () => {}),
     upsertDevice: vi.fn(async () => {}),
   };
-  return calls;
 }
 
 describe("applyEvents", () => {
@@ -2712,11 +2854,12 @@ describe("applyEvents", () => {
     expect(d.applyRollupDelta).toHaveBeenCalledWith(d.db, expect.objectContaining({ playCount: 1, watchMs: 2_000 }));
   });
 
-  it("still closes a session whose live details are already gone", async () => {
+  it("counts the play even though the stream is already gone from the payload", async () => {
     const d = deps();
     const key = snapshotKey("ps-1", "item-1");
 
-    // The stream vanished, so it is absent from the incoming payload — the common case.
+    // The stream vanished, so it is absent from the incoming payload — the common case,
+    // and the reason the rollup must be driven by the returned row rather than the payload.
     await applyEvents(d, [{ type: "ended", key, positionTicks: 95, watchedMs: 2_000, at: AT.getTime() }], new Map());
 
     expect(d.closeSession).toHaveBeenCalledWith(d.db, expect.objectContaining({
@@ -2724,6 +2867,20 @@ describe("applyEvents", () => {
       itemId: "item-1",
       runtimeTicks: null,
     }));
+    expect(d.applyRollupDelta).toHaveBeenCalledWith(d.db, expect.objectContaining({
+      userId: "user-1",
+      playCount: 1,
+      watchMs: 2_000,
+    }));
+  });
+
+  it("does not count the play again when the close finds no open row", async () => {
+    const d = deps(null);
+    const key = snapshotKey("ps-1", "item-1");
+
+    await applyEvents(d, [{ type: "ended", key, positionTicks: 95, watchedMs: 2_000, at: AT.getTime() }], new Map());
+
+    expect(d.applyRollupDelta).not.toHaveBeenCalled();
   });
 
   it("marks the session paused without crediting time", async () => {
@@ -2740,18 +2897,22 @@ describe("applyEvents", () => {
     expect(d.touchSession).toHaveBeenCalledWith(d.db, expect.objectContaining({ isPaused: true, watchedMs: 5_000 }));
   });
 
-  it("attributes watch time to the UTC day the poll occurred", async () => {
-    const d = deps();
+  it("attributes watch time to the session's start day, not the poll day", async () => {
+    // Session started at 23:55 on the 16th; this poll lands at 00:05 on the 17th.
+    const startedAt = new Date("2026-08-16T23:55:00Z");
+    const d = deps({ userId: "user-1", itemId: "item-1", startedAt });
     const session = live();
     const key = snapshotKey("ps-1", "item-1");
-    const justBeforeMidnight = new Date("2026-08-16T23:59:59Z").getTime();
+    const afterMidnight = new Date("2026-08-17T00:05:00Z").getTime();
 
     await applyEvents(
       d,
-      [{ type: "progressed", key, positionTicks: 50, watchedMs: 5_000, at: justBeforeMidnight }],
+      [{ type: "progressed", key, positionTicks: 50, watchedMs: 5_000, at: afterMidnight }],
       new Map([[key, session]]),
     );
 
+    // recomputeRollupRange groups by started_at::date, so the incremental path must
+    // agree or the nightly job would silently move this stream to a different day.
     expect(d.applyRollupDelta).toHaveBeenCalledWith(d.db, expect.objectContaining({ day: "2026-08-16" }));
   });
 });
@@ -2848,7 +3009,7 @@ export async function applyEvents(
 
       case "progressed":
       case "paused": {
-        await deps.touchSession(deps.db, {
+        const touched = await deps.touchSession(deps.db, {
           playSessionId,
           itemId,
           positionTicks: event.positionTicks,
@@ -2857,10 +3018,13 @@ export async function applyEvents(
           at,
         });
 
-        if (event.watchedMs > 0 && live) {
+        if (event.watchedMs > 0 && touched) {
           await deps.applyRollupDelta(deps.db, {
-            day: utcDay(event.at),
-            userId: live.userId,
+            // Keyed on the session's start day, matching how recomputeRollupRange
+            // groups. Using the poll day instead would split a stream that crosses
+            // midnight and put the two paths permanently out of agreement.
+            day: utcDay(touched.startedAt.getTime()),
+            userId: touched.userId,
             itemId,
             libraryId: null,
             playCount: 0,
@@ -2871,7 +3035,7 @@ export async function applyEvents(
       }
 
       case "ended": {
-        await deps.closeSession(deps.db, {
+        const closed = await deps.closeSession(deps.db, {
           playSessionId,
           itemId,
           positionTicks: event.positionTicks,
@@ -2883,10 +3047,12 @@ export async function applyEvents(
           at,
         });
 
-        if (live) {
+        // closeSession returns null if the row was already closed, which is what keeps
+        // a replayed end from counting the play twice.
+        if (closed) {
           await deps.applyRollupDelta(deps.db, {
-            day: utcDay(event.at),
-            userId: live.userId,
+            day: utcDay(closed.startedAt.getTime()),
+            userId: closed.userId,
             itemId,
             libraryId: null,
             playCount: 1,
@@ -2929,7 +3095,12 @@ export async function runSessionPoll(deps: PollDeps): Promise<void> {
 }
 ```
 
-**Note on `ended` rollups:** when a stream vanishes, `live` is `undefined`, so the `playCount: 1` rollup is skipped. That looks like a bug but is not — Task 10's reconciliation and the nightly `recomputeRollupRange` both rebuild from `playback_sessions`, which always has the closed row. The incremental path is an optimisation; the recompute is the correctness guarantee. The two tests in Task 7 asserting they agree are what proves it.
+**Why rollups are driven by the returned row, never by `live`:** an ended stream is already
+absent from `/Sessions`, so `live` is `undefined` for exactly the event that counts a play.
+Driving the rollup from `closeSession`'s returned row counts the play at the moment it
+happens rather than leaving it at zero until the nightly recompute, and keys it on the
+session's start day so both paths agree. `live` is still consulted for `runtimeTicks`,
+which the row does not carry.
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
@@ -2937,7 +3108,7 @@ export async function runSessionPoll(deps: PollDeps): Promise<void> {
 pnpm vitest run apps/server/src/sync/applier.test.ts
 ```
 
-Expected: PASS, 8 tests.
+Expected: PASS, 9 tests.
 
 - [ ] **Step 7: Commit**
 
@@ -3915,6 +4086,57 @@ describe("sync pipeline", () => {
     });
   });
 
+  it("agrees with the recompute for a stream that crosses midnight", async () => {
+    await withTestDatabase(async (db) => {
+      await upsertItems(db, [{ id: "item-1", type: "Movie", name: "Demo Movie", libraryId: "lib-1" }]);
+
+      const beforeMidnight = new Date("2026-08-16T23:55:00Z").getTime();
+      const snapshots = memorySnapshotStore();
+      let clock = beforeMidnight;
+      let current: LiveSession[] = [liveSession()];
+
+      const deps = {
+        db,
+        jellyfin: { getSessions: async () => current } as never,
+        snapshots,
+        completionThreshold: 0.9,
+        maxWatchDeltaMs: 7_500,
+        now: () => clock,
+        openSession,
+        touchSession,
+        closeSession,
+        applyRollupDelta,
+        upsertDevice,
+      };
+
+      await runSessionPoll(deps);
+
+      // Next poll lands on the following calendar day.
+      clock = new Date("2026-08-17T00:05:00Z").getTime();
+      current = [liveSession({ positionTicks: 600_000 * 10_000 })];
+      await runSessionPoll(deps);
+
+      clock += 5_000;
+      current = [];
+      await runSessionPoll(deps);
+
+      const incremental = await db.select().from(playbackRollupDaily);
+      // One row, on the start day — not split across the 16th and 17th.
+      expect(incremental).toHaveLength(1);
+      expect(incremental[0]?.day).toBe("2026-08-16");
+
+      const incrementalWatchMs = incremental[0]?.watchMs ?? 0;
+
+      await recomputeRollupRange(db, new Date("2026-08-15T00:00:00Z"), new Date("2026-08-18T00:00:00Z"));
+
+      const recomputed = await db.select().from(playbackRollupDaily);
+      expect(recomputed).toHaveLength(1);
+      expect(recomputed[0]?.day).toBe("2026-08-16");
+      expect(recomputed[0]?.watchMs).toBe(incrementalWatchMs);
+      expect(recomputed[0]?.playCount).toBe(1);
+    });
+  });
+
   it("keeps rollup totals equal to session totals for seeded data", async () => {
     await withTestDatabase(async (db) => {
       const { generateSeedData } = await import("../seed.js");
@@ -4066,7 +4288,7 @@ rather than only at the repository level."
 
 **Deferred to later plans, by design:** authentication and the fallback admin (Plan 2), SSE endpoint and image proxy (Plan 2), all UI and the three-layer component architecture (Plan 3), the production multi-stage Dockerfile and the `app`/`worker` compose services (Plan 3), Playwright smoke test (Plan 3).
 
-**Known deliberate gap.** `applyEvents` skips the `playCount` rollup when an ended stream is already absent from the payload — which is the normal case. The nightly `recomputeRollupRange` is the authority for play counts; the incremental path optimises watch time. Task 13's first test asserts the two agree. Flagged here so a reviewer does not read it as an oversight.
+**Day attribution is a cross-task invariant.** Both the incremental path (Task 9) and the nightly recompute (Task 7) key rollups on the session's **start day**. A reviewer seeing only one task cannot check this; Task 13's cross-midnight test is what holds the two together. If either side is ever changed to use the poll day, that test fails — which is the point.
 
 ---
 
