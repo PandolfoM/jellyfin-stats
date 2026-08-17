@@ -20,9 +20,32 @@ import { runReferenceSync } from "./sync/reference-sync.js";
 
 const QUEUE_NAME = "jfstats-sync";
 
-type JobName = "session-poll" | "reference-sync" | "item-sync" | "rollup-recompute";
+const DAY_MS = 24 * 60 * 60 * 1000;
+const ROLLUP_LOOKBACK_DAYS = 7;
 
-async function handle(context: AppContext, name: JobName): Promise<void> {
+export type JobName = "session-poll" | "reference-sync" | "item-sync" | "rollup-recompute";
+
+/**
+ * The range the nightly recompute rebuilds: the trailing 7 *whole* UTC days, ending at
+ * (and excluding) the current UTC day. The day in progress is deliberately left out —
+ * it is still being written incrementally, and rebuilding it from a partial set of
+ * sessions would fight the applier rather than correct it.
+ *
+ * recomputeRollupRange floors `from` down and ceils `to` up to UTC day boundaries, so
+ * both bounds must already sit on a day boundary here — otherwise floor+ceil silently
+ * add an extra day to the window regardless of what time the cron fires.
+ *
+ * Takes `now` rather than reading the clock itself, matching every other
+ * time-dependent function on this path (diffSessions, runSessionPoll,
+ * reconcileOpenSessions, generateSeedData) and making the boundary behavior testable.
+ */
+export function rollupWindow(now: number): { from: Date; to: Date } {
+  const to = new Date(new Date(now).toISOString().slice(0, 10));
+  const from = new Date(to.getTime() - ROLLUP_LOOKBACK_DAYS * DAY_MS);
+  return { from, to };
+}
+
+export async function handle(context: AppContext, name: JobName, now = Date.now): Promise<void> {
   switch (name) {
     case "session-poll":
       await runSessionPoll({
@@ -53,13 +76,7 @@ async function handle(context: AppContext, name: JobName): Promise<void> {
       return;
 
     case "rollup-recompute": {
-      // Trailing 7 UTC days, ending at today's UTC day start. recomputeRollupRange
-      // floors `from` down and ceils `to` up to UTC day boundaries, so both bounds must
-      // already sit on a day boundary here — otherwise floor+ceil silently add an extra
-      // day to the window regardless of what time the cron fires.
-      const todayUtcStart = new Date(new Date().toISOString().slice(0, 10));
-      const to = todayUtcStart;
-      const from = new Date(to.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const { from, to } = rollupWindow(now());
       await recomputeRollupRange(context.db, from, to);
       return;
     }
@@ -80,6 +97,13 @@ async function main(): Promise<void> {
   const context = createContext(loadEnv());
   const { logger, env } = context;
 
+  // Registered before anything touches Redis. Without an `error` listener ioredis and
+  // BullMQ fall back to console.error, which bypasses the configured level and — the
+  // reason this matters — the redaction paths configured in logger.ts.
+  context.redis.on("error", (error) => {
+    logger.error({ err: error }, "redis connection error");
+  });
+
   logger.info({ pollIntervalMs: env.SESSION_POLL_INTERVAL_MS }, "worker starting");
 
   const repaired = await reconcileOpenSessions({
@@ -88,10 +112,24 @@ async function main(): Promise<void> {
     completionThreshold: env.COMPLETION_THRESHOLD,
     findStaleOpenSessions,
     closeSession,
+    applyRollupDelta,
   });
   logger.info({ repaired }, "startup reconciliation complete");
 
-  const queue = new Queue(QUEUE_NAME, { connection: context.redis });
+  const queue = new Queue(QUEUE_NAME, {
+    connection: context.redis,
+    // Without this, bullmq's getKeepJobs resolves both-undefined to { count: -1 } —
+    // keep every finished job forever. At a 5s poll that is ~17,280 completed job
+    // hashes a day accumulating in Redis, which runs with appendonly on a named volume
+    // and so survives restarts: an out-of-memory event in months, after which the
+    // pipeline stops with no obvious cause. Failures are kept far longer than
+    // successes because they are the ones worth reading after the fact.
+    defaultJobOptions: { removeOnComplete: 100, removeOnFail: 1000 },
+  });
+
+  queue.on("error", (error) => {
+    logger.error({ err: error }, "queue error");
+  });
 
   // Repeatable jobs are keyed by name, so re-registering on every boot replaces the
   // schedule rather than stacking duplicates.
@@ -115,6 +153,12 @@ async function main(): Promise<void> {
     logger.error({ job: job?.name, err: error }, "sync job failed");
   });
 
+  // "failed" covers a job that threw. "error" covers everything else BullMQ hits —
+  // a lost connection, a Lua script failure — which would otherwise go to console.error.
+  worker.on("error", (error) => {
+    logger.error({ err: error }, "worker error");
+  });
+
   const shutdown = async (): Promise<void> => {
     logger.info("worker shutting down");
     await worker.close();
@@ -127,4 +171,8 @@ async function main(): Promise<void> {
   process.on("SIGINT", () => void shutdown());
 }
 
-await main();
+// Only run when invoked directly, so importing this module in tests is side-effect
+// free — the same guard the seed script uses.
+if (process.argv[1]?.endsWith("worker.ts")) {
+  await main();
+}
