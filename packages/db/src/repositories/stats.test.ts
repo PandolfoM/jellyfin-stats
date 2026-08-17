@@ -2,7 +2,14 @@ import { sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { items, jellyfinUsers, libraries, playbackRollupDaily } from "../schema.js";
 import { stopTestDatabase, withTestDatabase } from "../testing/harness.js";
-import { getOverview, getTopItems, getWatchTimeSeries } from "./stats.js";
+import {
+  getLibraryStats,
+  getOverview,
+  getTopItems,
+  getUserDetail,
+  getUserStats,
+  getWatchTimeSeries,
+} from "./stats.js";
 import type { Db } from "../client.js";
 
 afterAll(stopTestDatabase);
@@ -181,6 +188,88 @@ async function seedHugeWatchTime(db: Db): Promise<void> {
     VALUES ('2026-08-10', 'user-a', 'item-huge', 'lib-movies', 1, ${HUGE_WATCH_MS}::bigint)
   `);
 }
+
+describe("getUserStats", () => {
+  it("returns every known user, including those with no activity in range", async () => {
+    await withTestDatabase(async (db) => {
+      await seed(db);
+
+      const stats = await getUserStats(db, { from: "2026-08-12", to: "2026-08-12" });
+
+      // user-b watched nothing that day but must not disappear from the list.
+      expect(stats).toEqual([
+        expect.objectContaining({ userId: "user-a", name: "alpha", plays: 3, watchMs: 90_000 }),
+        expect.objectContaining({ userId: "user-b", name: "beta", plays: 0, watchMs: 0 }),
+      ]);
+    });
+  });
+
+  it("orders by watch time descending", async () => {
+    await withTestDatabase(async (db) => {
+      await seed(db);
+
+      const stats = await getUserStats(db, RANGE);
+
+      expect(stats.map((row) => row.userId)).toEqual(["user-a", "user-b"]);
+    });
+  });
+
+  it("excludes archived users", async () => {
+    await withTestDatabase(async (db) => {
+      await seed(db);
+      await db.insert(jellyfinUsers).values({ id: "user-gone", name: "gone", archived: true });
+
+      const stats = await getUserStats(db, RANGE);
+
+      expect(stats.map((row) => row.userId)).not.toContain("user-gone");
+    });
+  });
+});
+
+describe("getLibraryStats", () => {
+  it("returns every library with its totals, zero-filled", async () => {
+    await withTestDatabase(async (db) => {
+      await seed(db);
+
+      const stats = await getLibraryStats(db, { from: "2026-08-12", to: "2026-08-12" });
+
+      expect(stats).toEqual([
+        expect.objectContaining({ libraryId: "lib-shows", name: "Shows", plays: 3, watchMs: 90_000 }),
+        expect.objectContaining({ libraryId: "lib-movies", name: "Movies", plays: 0, watchMs: 0 }),
+      ]);
+    });
+  });
+});
+
+describe("getUserDetail", () => {
+  it("returns totals for one user", async () => {
+    await withTestDatabase(async (db) => {
+      await seed(db);
+
+      const detail = await getUserDetail(db, "user-a", RANGE);
+
+      expect(detail).toMatchObject({ userId: "user-a", name: "alpha", plays: 5, watchMs: 150_000 });
+    });
+  });
+
+  it("returns null for an unknown user rather than an empty shell", async () => {
+    await withTestDatabase(async (db) => {
+      await seed(db);
+
+      expect(await getUserDetail(db, "nobody", RANGE)).toBeNull();
+    });
+  });
+
+  it("returns a known user with zeros when they watched nothing in range", async () => {
+    await withTestDatabase(async (db) => {
+      await seed(db);
+
+      const detail = await getUserDetail(db, "user-b", { from: "2026-08-12", to: "2026-08-12" });
+
+      expect(detail).toMatchObject({ userId: "user-b", plays: 0, watchMs: 0 });
+    });
+  });
+});
 
 describe("watch time precision beyond Number.MAX_SAFE_INTEGER", () => {
   it("getTopItems converts the full decimal value rather than an already-mangled one", async () => {

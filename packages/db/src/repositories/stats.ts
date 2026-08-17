@@ -124,3 +124,145 @@ export async function getTopItems(
 
   return rows.map((row) => ({ ...row, plays: Number(row.plays), watchMs: Number(row.watchMs) }));
 }
+
+export interface UserStat {
+  userId: string;
+  name: string;
+  isAdmin: boolean;
+  plays: number;
+  watchMs: number;
+}
+
+export interface LibraryStat {
+  libraryId: string;
+  name: string;
+  collectionType: string | null;
+  plays: number;
+  watchMs: number;
+}
+
+export interface UserDetail extends UserStat {
+  devices: { deviceId: string; name: string; plays: number }[];
+}
+
+export async function getUserStats(db: Db, range: DateRange): Promise<UserStat[]> {
+  // LEFT JOIN from users, not from the rollup: a user who took a week off must
+  // still appear, with zeros, rather than vanishing from the list.
+  const result = await db.execute<{
+    user_id: string;
+    name: string;
+    is_admin: boolean;
+    plays: string;
+    watch_ms: string;
+  }>(sql`
+    SELECT
+      u.id                                    AS user_id,
+      u.name                                  AS name,
+      u.is_admin                              AS is_admin,
+      coalesce(sum(r.play_count), 0)::text    AS plays,
+      coalesce(sum(r.watch_ms), 0)::text      AS watch_ms
+    FROM jellyfin_users u
+    LEFT JOIN playback_rollup_daily r
+      ON r.user_id = u.id AND r.day >= ${range.from} AND r.day <= ${range.to}
+    WHERE u.archived = false
+    GROUP BY u.id, u.name, u.is_admin
+    ORDER BY coalesce(sum(r.watch_ms), 0) DESC, u.name ASC
+  `);
+
+  return result.rows.map((row) => ({
+    userId: row.user_id,
+    name: row.name,
+    isAdmin: row.is_admin,
+    plays: Number(row.plays),
+    watchMs: Number(row.watch_ms),
+  }));
+}
+
+export async function getLibraryStats(db: Db, range: DateRange): Promise<LibraryStat[]> {
+  const result = await db.execute<{
+    library_id: string;
+    name: string;
+    collection_type: string | null;
+    plays: string;
+    watch_ms: string;
+  }>(sql`
+    SELECT
+      l.id                                    AS library_id,
+      l.name                                  AS name,
+      l.collection_type                       AS collection_type,
+      coalesce(sum(r.play_count), 0)::text    AS plays,
+      coalesce(sum(r.watch_ms), 0)::text      AS watch_ms
+    FROM libraries l
+    LEFT JOIN playback_rollup_daily r
+      ON r.library_id = l.id AND r.day >= ${range.from} AND r.day <= ${range.to}
+    WHERE l.archived = false
+    GROUP BY l.id, l.name, l.collection_type
+    ORDER BY coalesce(sum(r.watch_ms), 0) DESC, l.name ASC
+  `);
+
+  return result.rows.map((row) => ({
+    libraryId: row.library_id,
+    name: row.name,
+    collectionType: row.collection_type,
+    plays: Number(row.plays),
+    watchMs: Number(row.watch_ms),
+  }));
+}
+
+export async function getUserDetail(
+  db: Db,
+  userId: string,
+  range: DateRange,
+): Promise<UserDetail | null> {
+  const totals = await db.execute<{
+    user_id: string;
+    name: string;
+    is_admin: boolean;
+    plays: string;
+    watch_ms: string;
+  }>(sql`
+    SELECT
+      u.id AS user_id, u.name AS name, u.is_admin AS is_admin,
+      coalesce(sum(r.play_count), 0)::text AS plays,
+      coalesce(sum(r.watch_ms), 0)::text   AS watch_ms
+    FROM jellyfin_users u
+    LEFT JOIN playback_rollup_daily r
+      ON r.user_id = u.id AND r.day >= ${range.from} AND r.day <= ${range.to}
+    WHERE u.id = ${userId}
+    GROUP BY u.id, u.name, u.is_admin
+  `);
+
+  const row = totals.rows[0];
+  if (row === undefined) return null;
+
+  // Device breakdown comes from the session table — it is per-user and small,
+  // and the rollup deliberately does not carry device identity.
+  const devices = await db.execute<{ device_id: string; name: string; plays: string }>(sql`
+    SELECT
+      s.device_id                        AS device_id,
+      coalesce(d.name, 'Unknown device') AS name,
+      count(*)::text                     AS plays
+    FROM playback_sessions s
+    LEFT JOIN devices d ON d.id = s.device_id
+    WHERE s.user_id = ${userId}
+      AND s.ended_at IS NOT NULL
+      AND (s.started_at AT TIME ZONE 'UTC')::date >= ${range.from}::date
+      AND (s.started_at AT TIME ZONE 'UTC')::date <= ${range.to}::date
+      AND s.device_id IS NOT NULL
+    GROUP BY s.device_id, d.name
+    ORDER BY count(*) DESC
+  `);
+
+  return {
+    userId: row.user_id,
+    name: row.name,
+    isAdmin: row.is_admin,
+    plays: Number(row.plays),
+    watchMs: Number(row.watch_ms),
+    devices: devices.rows.map((device) => ({
+      deviceId: device.device_id,
+      name: device.name,
+      plays: Number(device.plays),
+    })),
+  };
+}
