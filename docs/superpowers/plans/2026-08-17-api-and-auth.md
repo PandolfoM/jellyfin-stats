@@ -1376,7 +1376,7 @@ The existing `app.test.ts` context stub will need `redis` and the new env fields
 pnpm vitest run apps/server/src/api/routes/auth.test.ts
 ```
 
-Expected: PASS, 17 tests.
+Expected: PASS, 18 tests.
 
 - [ ] **Step 6: Full suite, typecheck, commit**
 
