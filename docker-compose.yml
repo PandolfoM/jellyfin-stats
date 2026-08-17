@@ -30,6 +30,26 @@ services:
       timeout: 5s
       retries: 10
 
+  # The `api` service is commented out because no production image exists yet —
+  # `dev:worker` and `dev:api` currently run on the host via `tsx`, and the
+  # multi-stage Dockerfile that would build this image is Plan 3's work. A
+  # compose service pointing at a nonexistent image would break `docker compose
+  # up` for anyone who tried it. Uncomment once Plan 3 adds the Dockerfile.
+  #
+  # api:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   restart: unless-stopped
+  #   env_file: .env
+  #   ports:
+  #     - "${API_PORT:-3000}:3000"
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+
 volumes:
   postgres-data:
   redis-data:
