@@ -1,0 +1,10 @@
+{
+  "name": "@jfstats/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "tsc --build" },
+  "dependencies": {
+    "@jfstats/shared": "workspace:*"
+  }
+}
