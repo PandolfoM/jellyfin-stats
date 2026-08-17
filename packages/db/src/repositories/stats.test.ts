@@ -177,15 +177,19 @@ describe("getTopItems", () => {
     await withTestDatabase(async (db) => {
       await db.insert(libraries).values({ id: "lib-movies", name: "Movies" });
       await db.insert(jellyfinUsers).values({ id: "user-a", name: "alpha", isAdmin: true });
+      // Ids ascend in the opposite order to names, so a plan that happens to
+      // emit groups in group-key order produces Zulu, Mike, Alpha — the exact
+      // reverse of what the tiebreak must produce. Without this inversion the
+      // assertion passes either way and proves nothing.
       await db.insert(items).values([
-        { id: "item-z", name: "Zulu", type: "Movie", libraryId: "lib-movies" },
-        { id: "item-a", name: "Alpha", type: "Movie", libraryId: "lib-movies" },
-        { id: "item-m", name: "Mike", type: "Movie", libraryId: "lib-movies" },
+        { id: "item-1", name: "Zulu", type: "Movie", libraryId: "lib-movies" },
+        { id: "item-2", name: "Mike", type: "Movie", libraryId: "lib-movies" },
+        { id: "item-3", name: "Alpha", type: "Movie", libraryId: "lib-movies" },
       ]);
       await db.insert(playbackRollupDaily).values([
-        { day: "2026-08-10", userId: "user-a", itemId: "item-z", libraryId: "lib-movies", playCount: 1, watchMs: 5_000 },
-        { day: "2026-08-10", userId: "user-a", itemId: "item-a", libraryId: "lib-movies", playCount: 1, watchMs: 5_000 },
-        { day: "2026-08-10", userId: "user-a", itemId: "item-m", libraryId: "lib-movies", playCount: 1, watchMs: 5_000 },
+        { day: "2026-08-10", userId: "user-a", itemId: "item-1", libraryId: "lib-movies", playCount: 1, watchMs: 5_000 },
+        { day: "2026-08-10", userId: "user-a", itemId: "item-2", libraryId: "lib-movies", playCount: 1, watchMs: 5_000 },
+        { day: "2026-08-10", userId: "user-a", itemId: "item-3", libraryId: "lib-movies", playCount: 1, watchMs: 5_000 },
       ]);
 
       const top = await getTopItems(db, RANGE, { limit: 10 });
