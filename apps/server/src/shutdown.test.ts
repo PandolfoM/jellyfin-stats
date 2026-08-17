@@ -74,4 +74,75 @@ describe("createShutdownHandler", () => {
     await vi.waitFor(() => expect(exit).toHaveBeenCalled());
     expect(exit).toHaveBeenCalledTimes(1);
   });
+
+  it("gives up and exits non-zero when teardown never settles", async () => {
+    // The backstop for a whole class of bug: any teardown step that can hang
+    // (an SSE handler still holding a connection, a socket that never drains)
+    // would otherwise leave the process alive past the signal with no log line
+    // after startMessage, until the supervisor's grace period expires and
+    // SIGKILL lands. A never-settling promise stands in for all of them.
+    const logger = testLogger();
+    const exit = vi.fn();
+    const shutdown = createShutdownHandler({
+      logger,
+      onShutdown: () => new Promise<void>(() => {}),
+      exit,
+      startMessage: "test shutting down",
+      failureMessage: "test shutdown failed",
+      timeoutMs: 25,
+    });
+
+    shutdown();
+    await vi.waitFor(() => expect(exit).toHaveBeenCalled());
+
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(logger.error).toHaveBeenCalledWith({ timeoutMs: 25 }, "test shutdown failed");
+  });
+
+  it("does not report a second exit code if teardown finishes after the timeout fired", async () => {
+    const logger = testLogger();
+    const exit = vi.fn();
+    let resolveClose: (() => void) | undefined;
+    const shutdown = createShutdownHandler({
+      logger,
+      onShutdown: () =>
+        new Promise<void>((resolve) => {
+          resolveClose = resolve;
+        }),
+      exit,
+      startMessage: "test shutting down",
+      failureMessage: "test shutdown failed",
+      timeoutMs: 25,
+    });
+
+    shutdown();
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1));
+
+    resolveClose?.();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(exit).toHaveBeenCalledTimes(1);
+    expect(exit).not.toHaveBeenCalledWith(0);
+  });
+
+  it("does not time out a teardown that completes in time", async () => {
+    const logger = testLogger();
+    const exit = vi.fn();
+    const shutdown = createShutdownHandler({
+      logger,
+      onShutdown: async () => {},
+      exit,
+      startMessage: "test shutting down",
+      failureMessage: "test shutdown failed",
+      timeoutMs: 25,
+    });
+
+    shutdown();
+    await vi.waitFor(() => expect(exit).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    expect(exit).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledWith(0);
+    expect(logger.error).not.toHaveBeenCalled();
+  });
 });

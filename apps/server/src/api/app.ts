@@ -10,14 +10,15 @@ import {
 import type { AppEnv } from "@jfstats/shared";
 import { Hono } from "hono";
 import type Redis from "ioredis";
-import type { AppContext } from "../context.js";
+import { attachRedisErrorLogger, type AppContext } from "../context.js";
+import type { Logger } from "../logger.js";
 import { LIVE_CHANNEL } from "../sync/snapshot-store.js";
 import { requireAdmin } from "./middleware/auth.js";
 import { createRateLimiter } from "./rate-limit.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHistoryRoutes } from "./routes/history.js";
 import { registerImageRoutes, type ImageDeps } from "./routes/images.js";
-import { registerLiveRoute, type LiveDeps } from "./routes/live.js";
+import { registerLiveRoute, type LiveDeps, type LiveStreamRegistry } from "./routes/live.js";
 import { registerStatsRoutes } from "./routes/stats.js";
 import { createSessionStore, type SessionRecord } from "./sessions.js";
 
@@ -36,9 +37,17 @@ export interface AppVariables {
  * connection must not be leaked if the SUBSCRIBE call itself fails) can be
  * unit-tested without going through the full authenticated request path.
  */
-export function createLiveSubscriber(redis: Redis): LiveDeps["subscribe"] {
+export function createLiveSubscriber(
+  redis: Redis,
+  logger: Pick<Logger, "error">,
+): LiveDeps["subscribe"] {
   return async (onMessage) => {
     const subscriber = redis.duplicate();
+    // Before SUBSCRIBE, so a failure during the round trip is already covered.
+    // duplicate() does not carry listeners over, and there is one of these
+    // connections per attached dashboard tab — each would otherwise fall back to
+    // ioredis's unredacted console.error.
+    attachRedisErrorLogger(subscriber, logger, "live subscriber connection error");
     try {
       await subscriber.subscribe(LIVE_CHANNEL);
     } catch (error) {
@@ -49,7 +58,18 @@ export function createLiveSubscriber(redis: Redis): LiveDeps["subscribe"] {
     }
     subscriber.on("message", (_channel, payload) => onMessage(payload));
     return async () => {
-      await subscriber.quit();
+      // Swallowed here rather than at each call site. One of those call sites is
+      // the stream's abort path, where Hono invokes subscribers through forEach
+      // with no error handling — and ioredis rejects pending commands with
+      // "Connection is closed." whenever the connection has already dropped. An
+      // unobserved rejection there terminates the process under Node's default
+      // --unhandled-rejections=throw. The connection being gone is exactly the
+      // outcome quit() was called for, so there is nothing to report.
+      try {
+        await subscriber.quit();
+      } catch {
+        // already gone
+      }
     };
   };
 }
@@ -93,13 +113,43 @@ export function createImageFetcher(
   };
 }
 
-export function createApp(context: AppContext) {
+export interface App {
+  app: Hono<{ Variables: AppVariables }>;
+  /** Open SSE streams, so shutdown can end them instead of waiting on them. */
+  liveStreams: LiveStreamRegistry;
+}
+
+export function createApp(context: AppContext): App {
   const app = new Hono<{ Variables: AppVariables }>();
 
   app.get("/api/health", (c) => c.json({ status: "ok" }));
 
   const sessions = createSessionStore(context.redis, context.env.SESSION_TTL_HOURS * 60 * 60);
   const rateLimiter = createRateLimiter(context.redis, { limit: 10, windowSeconds: 900 });
+
+  const cookieConfig = {
+    cookieSecure: context.env.COOKIE_SECURE,
+    sessionTtlHours: context.env.SESSION_TTL_HOURS,
+  };
+
+  // Every gate is declared here, in one block, ahead of the route registrations
+  // it protects — Hono runs handlers for a path in registration order, so a
+  // middleware registered after its route silently never runs first.
+  //
+  // /api/auth/me is gated like everything else rather than reading the session
+  // store itself: reading it directly slid the Redis TTL without re-issuing the
+  // cookie, so a client polling only /me kept its server-side session alive
+  // while its browser cookie expired on the maxAge fixed at login. It was also
+  // the one place a session was honoured without re-checking isAdmin.
+  app.use("/api/auth/me", requireAdmin(sessions, cookieConfig));
+  app.use("/api/stats/*", requireAdmin(sessions, cookieConfig));
+  app.use("/api/history", requireAdmin(sessions, cookieConfig));
+  // The live feed exposes who is watching what, in real time — the same
+  // sensitivity as history, and gated the same way.
+  app.use("/api/live", requireAdmin(sessions, cookieConfig));
+  // Ungated, this would let anyone who can reach the port enumerate a
+  // private media library by walking item ids.
+  app.use("/api/images/*", requireAdmin(sessions, cookieConfig));
 
   registerAuthRoutes(app, {
     authenticateByName: (u, p) => context.jellyfin.authenticateByName(u, p),
@@ -120,20 +170,6 @@ export function createApp(context: AppContext) {
         : null,
   });
 
-  const cookieConfig = {
-    cookieSecure: context.env.COOKIE_SECURE,
-    sessionTtlHours: context.env.SESSION_TTL_HOURS,
-  };
-
-  app.use("/api/stats/*", requireAdmin(sessions, cookieConfig));
-  app.use("/api/history", requireAdmin(sessions, cookieConfig));
-  // The live feed exposes who is watching what, in real time — the same
-  // sensitivity as history, and gated the same way.
-  app.use("/api/live", requireAdmin(sessions, cookieConfig));
-  // Ungated, this would let anyone who can reach the port enumerate a
-  // private media library by walking item ids.
-  app.use("/api/images/*", requireAdmin(sessions, cookieConfig));
-
   registerStatsRoutes(app, {
     getOverview: (range) => getOverview(context.db, range),
     getWatchTimeSeries: (range) => getWatchTimeSeries(context.db, range),
@@ -147,9 +183,9 @@ export function createApp(context: AppContext) {
 
   registerImageRoutes(app, { fetchImage: createImageFetcher(context.env) });
 
-  registerLiveRoute(app, {
+  const liveStreams = registerLiveRoute(app, {
     loadCurrent: () => context.snapshots.loadLive(),
-    subscribe: createLiveSubscriber(context.redis),
+    subscribe: createLiveSubscriber(context.redis, context.logger),
   });
 
   app.notFound((c) => c.json({ error: "not_found" }, 404));
@@ -161,7 +197,7 @@ export function createApp(context: AppContext) {
     return c.json({ error: "internal_error" }, 500);
   });
 
-  return app;
+  return { app, liveStreams };
 }
 
-export type AppType = ReturnType<typeof createApp>;
+export type AppType = App["app"];

@@ -1,6 +1,8 @@
 import type { LiveSession } from "@jfstats/shared";
 import { Hono } from "hono";
+import type Redis from "ioredis";
 import { describe, expect, it, vi } from "vitest";
+import { createLiveSubscriber } from "../app.js";
 import { registerLiveRoute, type LiveDeps } from "./live.js";
 
 const SESSION: LiveSession = {
@@ -156,5 +158,53 @@ describe("GET /api/live", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(unsubscribe).toHaveBeenCalled();
+  });
+
+  it("survives a client disconnect while the Redis connection is already gone", async () => {
+    // The abort path invokes unsubscribe without awaiting it — Hono's abort()
+    // runs its subscribers through forEach with no error handling, so nothing
+    // there can observe a rejection. ioredis rejects pending commands with
+    // "Connection is closed." during a blip, so a client disconnecting at the
+    // wrong moment would otherwise raise an unhandled rejection, which Node 22
+    // turns into a process exit by default. Composed against the real
+    // createLiveSubscriber rather than a hand-written stub, because the
+    // swallow lives in that closure.
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      const fakeSubscriber = {
+        subscribe: vi.fn(async () => {}),
+        on: vi.fn(),
+        quit: vi.fn(async () => {
+          throw new Error("Connection is closed.");
+        }),
+      };
+      const redis = { duplicate: () => fakeSubscriber } as unknown as Redis;
+
+      const app = new Hono();
+      registerLiveRoute(app, {
+        loadCurrent: async () => [],
+        subscribe: createLiveSubscriber(redis, { error: vi.fn() }),
+      });
+
+      const response = await app.request("/api/live");
+      const reader = response.body?.getReader();
+      await reader?.read();
+      await reader?.cancel();
+
+      // Node reports an unhandled rejection at the end of the turn, so give it
+      // several turns before concluding that none was raised.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(fakeSubscriber.quit).toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+
+    expect(unhandled).toEqual([]);
   });
 });

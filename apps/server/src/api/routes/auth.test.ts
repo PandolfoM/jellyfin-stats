@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import { JellyfinAuthError } from "@jfstats/jellyfin";
-import { registerAuthRoutes, SESSION_COOKIE, type AuthDeps } from "./auth.js";
+import { requireAdmin } from "../middleware/auth.js";
+import { registerAuthRoutes, SESSION_COOKIE, type AuthDeps, type SessionEnv } from "./auth.js";
 
 const ADMIN = { userId: "u-1", userName: "admin", isAdmin: true, accessToken: "tok-1" };
 
@@ -22,12 +23,21 @@ function build(overrides: Partial<AuthDeps> = {}) {
     ...overrides,
   };
 
-  const app = new Hono();
+  // Mirrors api/app.ts: the gate is mounted ahead of the routes it protects,
+  // because Hono runs handlers for a path in registration order.
+  const app = new Hono<SessionEnv>();
+  app.use(
+    "/api/auth/me",
+    requireAdmin(deps.sessions, {
+      cookieSecure: deps.cookieSecure,
+      sessionTtlHours: deps.sessionTtlHours,
+    }),
+  );
   registerAuthRoutes(app, deps);
   return { app, deps };
 }
 
-function login(app: Hono, body: unknown) {
+function login(app: Hono<SessionEnv>, body: unknown) {
   return app.request("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -310,5 +320,60 @@ describe("GET /api/auth/me", () => {
     const { app } = build();
 
     expect((await app.request("/api/auth/me")).status).toBe(401);
+  });
+
+  it("refreshes the session cookie, so polling it cannot outlive the browser's copy", async () => {
+    // The reason this route goes through requireAdmin at all. Reading the
+    // session store directly slid the Redis TTL but never re-issued the
+    // cookie, so a client polling only /me kept its server-side session alive
+    // while its own cookie expired on the maxAge fixed at login — the exact
+    // server-alive/client-dead divergence the middleware exists to prevent.
+    const { app } = build({
+      sessions: {
+        create: vi.fn(async () => "x"),
+        get: vi.fn(async () => ({
+          userId: "u-1",
+          userName: "admin",
+          isAdmin: true,
+          createdAt: 1_777_000_000_000,
+        })),
+        destroy: vi.fn(async () => {}),
+      },
+      sessionTtlHours: 168,
+    });
+
+    const response = await app.request("/api/auth/me", {
+      headers: { Cookie: `${SESSION_COOKIE}=session-id-1` },
+    });
+
+    const cookie = response.headers.get("set-cookie") ?? "";
+    expect(cookie).toContain(`${SESSION_COOKIE}=session-id-1`);
+    expect(cookie).toContain(`Max-Age=${168 * 60 * 60}`);
+    expect(cookie).toContain("HttpOnly");
+  });
+
+  it("refuses a live session that is not an administrator", async () => {
+    // The one place a stored session used to be honoured without re-checking
+    // isAdmin. A record created by any path that skipped the admin check — or
+    // one that survived a policy change — must not be sufficient on its own.
+    const { app } = build({
+      sessions: {
+        create: vi.fn(async () => "x"),
+        get: vi.fn(async () => ({
+          userId: "u-2",
+          userName: "viewer",
+          isAdmin: false,
+          createdAt: 1_777_000_000_000,
+        })),
+        destroy: vi.fn(async () => {}),
+      },
+    });
+
+    const response = await app.request("/api/auth/me", {
+      headers: { Cookie: `${SESSION_COOKIE}=session-id-2` },
+    });
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "unauthenticated" });
   });
 });

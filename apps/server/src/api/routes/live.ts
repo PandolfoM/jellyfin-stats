@@ -3,15 +3,39 @@ import type { Env, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 
 export interface LiveDeps {
-  /** Resolves once subscribed; the resolved function unsubscribes and closes the connection. */
+  /**
+   * Resolves once subscribed; the resolved function unsubscribes and closes the
+   * connection. It must not reject: it is invoked from the stream's abort path,
+   * where Hono runs subscribers through `forEach` with no error handling and
+   * nothing can observe a rejection. createLiveSubscriber (api/app.ts) is where
+   * that guarantee is implemented.
+   */
   subscribe(onMessage: (payload: string) => void): Promise<() => Promise<void>>;
   loadCurrent(): Promise<LiveSession[]>;
+}
+
+/**
+ * Ends every SSE stream this route currently holds open.
+ *
+ * An SSE handler parks until the client disconnects, and `server.close()` does
+ * not invoke its callback until every in-flight connection has ended — so
+ * without this, one attached dashboard tab makes graceful shutdown hang until
+ * the supervisor's grace period expires and SIGKILL lands, with the database and
+ * Redis never closed cleanly.
+ */
+export interface LiveStreamRegistry {
+  /** Resolves once every open stream has been ended and unsubscribed. */
+  closeAll(): Promise<void>;
+  /** Open stream count. Exposed for tests and diagnostics. */
+  readonly size: number;
 }
 
 // Comfortably inside the 30-60s window a typical idle-timeout proxy enforces.
 const HEARTBEAT_MS = 25_000;
 
-export function registerLiveRoute<E extends Env>(app: Hono<E>, deps: LiveDeps): void {
+export function registerLiveRoute<E extends Env>(app: Hono<E>, deps: LiveDeps): LiveStreamRegistry {
+  const openStreams = new Set<() => Promise<void>>();
+
   app.get("/api/live", (c) => {
     return streamSSE(c, async (stream) => {
       // Track abort before calling subscribe() at all — registered synchronously,
@@ -31,7 +55,7 @@ export function registerLiveRoute<E extends Env>(app: Hono<E>, deps: LiveDeps): 
 
       if (aborted) {
         // The client is already gone; nothing else has been set up yet
-        // (no heartbeat, no second onAbort), so unsubscribing is the only cleanup.
+        // (no heartbeat, no registry entry), so unsubscribing is the only cleanup.
         await unsubscribe();
         return;
       }
@@ -42,9 +66,28 @@ export function registerLiveRoute<E extends Env>(app: Hono<E>, deps: LiveDeps): 
         void stream.write(":\n\n");
       }, HEARTBEAT_MS);
 
+      // Memoized so the two ways out — the client disconnecting, and the server
+      // shutting down — run the teardown exactly once between them, and so the
+      // shutdown path can await teardown that the abort path started.
+      let teardown: Promise<void> | undefined;
+      const cleanup = (): Promise<void> =>
+        (teardown ??= (async () => {
+          clearInterval(heartbeat);
+          openStreams.delete(closeStream);
+          await unsubscribe();
+        })());
+
+      // stream.abort() runs every onAbort subscriber, which is what resolves the
+      // hold below and starts cleanup — the same path a real disconnect takes,
+      // rather than a second teardown route that could drift from it.
+      const closeStream = async (): Promise<void> => {
+        stream.abort();
+        await cleanup();
+      };
+      openStreams.add(closeStream);
+
       stream.onAbort(() => {
-        clearInterval(heartbeat);
-        void unsubscribe();
+        void cleanup();
       });
 
       // Send what is playing right now. Without this the page is blank until the
@@ -55,9 +98,20 @@ export function registerLiveRoute<E extends Env>(app: Hono<E>, deps: LiveDeps): 
         await stream.writeSSE({ event: "sessions", data: "[]" });
       }
 
-      // Hold the handler open until the client disconnects; writeSSE calls above
-      // keep pushing data through this same stream in the meantime.
+      // Hold the handler open until the client disconnects or the server shuts
+      // down; writeSSE calls above keep pushing data through this same stream in
+      // the meantime.
       await new Promise<void>((resolve) => stream.onAbort(resolve));
     });
   });
+
+  return {
+    get size() {
+      return openStreams.size;
+    },
+    async closeAll() {
+      // Snapshotted first: each closeStream removes itself from the set.
+      await Promise.all([...openStreams].map((closeStream) => closeStream()));
+    },
+  };
 }

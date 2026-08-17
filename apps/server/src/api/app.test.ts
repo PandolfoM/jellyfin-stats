@@ -17,12 +17,15 @@ function testContext(): AppContext {
     // before any handler touches context.db or context.snapshots.
     db: {},
     snapshots: {},
+    logger: { error: vi.fn(), info: vi.fn() },
   } as unknown as AppContext;
 }
 
+const testLogger = (): { error: ReturnType<typeof vi.fn> } => ({ error: vi.fn() });
+
 describe("createApp", () => {
   it("serves a health check without authentication", async () => {
-    const app = createApp(testContext());
+    const { app } = createApp(testContext());
 
     const response = await app.request("/api/health");
 
@@ -31,7 +34,7 @@ describe("createApp", () => {
   });
 
   it("returns JSON 404 for an unknown route rather than HTML", async () => {
-    const app = createApp(testContext());
+    const { app } = createApp(testContext());
 
     const response = await app.request("/api/nope");
 
@@ -41,7 +44,7 @@ describe("createApp", () => {
   });
 
   it("reports an unhandled route error as JSON without leaking the message", async () => {
-    const app = createApp(testContext());
+    const { app } = createApp(testContext());
     app.get("/api/boom", () => {
       throw new Error("internal detail that must not reach the client");
     });
@@ -56,7 +59,7 @@ describe("createApp", () => {
     // Proves requireAdmin is actually mounted on this route, not merely
     // written elsewhere: without this, every user's stats would be reachable
     // by anyone who can reach the port.
-    const app = createApp(testContext());
+    const { app } = createApp(testContext());
 
     const response = await app.request("/api/stats/overview");
 
@@ -64,7 +67,7 @@ describe("createApp", () => {
   });
 
   it("rejects an unauthenticated request to the history API", async () => {
-    const app = createApp(testContext());
+    const { app } = createApp(testContext());
 
     const response = await app.request("/api/history");
 
@@ -74,7 +77,7 @@ describe("createApp", () => {
   it("rejects an unauthenticated request to the live feed", async () => {
     // The live feed shows who is watching what, in real time — the same
     // sensitivity as history, so it must be gated the same way.
-    const app = createApp(testContext());
+    const { app } = createApp(testContext());
 
     const response = await app.request("/api/live");
 
@@ -85,9 +88,22 @@ describe("createApp", () => {
     // Proves requireAdmin is actually mounted on this route, not merely
     // written elsewhere: an open image proxy would let anyone who can reach
     // the port enumerate a private media library by walking item ids.
-    const app = createApp(testContext());
+    const { app } = createApp(testContext());
 
     const response = await app.request("/api/images/items/anything");
+
+    expect(response.status).toBe(401);
+  });
+
+  it("rejects an unauthenticated request to /api/auth/me", async () => {
+    // /me used to read the session store itself, which slid the Redis TTL
+    // without re-issuing the cookie and skipped the isAdmin re-check. It is
+    // mounted behind the same middleware as everything else now; this proves
+    // the middleware is actually mounted ahead of the route, which Hono only
+    // honours when app.use() is registered first.
+    const { app } = createApp(testContext());
+
+    const response = await app.request("/api/auth/me");
 
     expect(response.status).toBe(401);
   });
@@ -109,10 +125,75 @@ describe("createLiveSubscriber", () => {
     };
     const redis = { duplicate: vi.fn(() => fakeSubscriber) } as unknown as Redis;
 
-    const subscribe = createLiveSubscriber(redis);
+    const subscribe = createLiveSubscriber(redis, testLogger());
 
     await expect(subscribe(() => {})).rejects.toThrow("redis hiccup");
     expect(quit).toHaveBeenCalled();
+  });
+
+  it("registers an error listener on the duplicated connection before subscribing", async () => {
+    // duplicate() does not carry listeners over from the shared client, and
+    // there is one of these per attached dashboard tab. With no `error`
+    // listener ioredis falls back to console.error, which bypasses LOG_LEVEL
+    // and the redaction paths in logger.ts — and REDIS_URL can carry a
+    // password. Registered before SUBSCRIBE so a failure during that round
+    // trip is already covered.
+    const events: string[] = [];
+    const fakeSubscriber = {
+      subscribe: vi.fn(async () => {
+        events.push("subscribe");
+      }),
+      quit: vi.fn(async () => {}),
+      on: vi.fn((event: string) => {
+        events.push(`on:${event}`);
+      }),
+    };
+    const redis = { duplicate: vi.fn(() => fakeSubscriber) } as unknown as Redis;
+
+    await createLiveSubscriber(redis, testLogger())(() => {});
+
+    expect(events.indexOf("on:error")).toBeGreaterThanOrEqual(0);
+    expect(events.indexOf("on:error")).toBeLessThan(events.indexOf("subscribe"));
+  });
+
+  it("logs a connection error from the duplicated client through the app logger", async () => {
+    let onError: ((error: Error) => void) | undefined;
+    const fakeSubscriber = {
+      subscribe: vi.fn(async () => {}),
+      quit: vi.fn(async () => {}),
+      on: vi.fn((event: string, listener: (error: Error) => void) => {
+        if (event === "error") onError = listener;
+      }),
+    };
+    const redis = { duplicate: vi.fn(() => fakeSubscriber) } as unknown as Redis;
+    const logger = testLogger();
+
+    await createLiveSubscriber(redis, logger)(() => {});
+    const failure = new Error("ECONNRESET");
+    onError?.(failure);
+
+    expect(logger.error).toHaveBeenCalledWith({ err: failure }, "live subscriber connection error");
+  });
+
+  it("resolves rather than rejecting when quit fails, because nothing observes the abort path", async () => {
+    // The unsubscribe closure is invoked from stream.onAbort, where Hono runs
+    // subscribers through forEach with no error handling. ioredis rejects
+    // pending commands with "Connection is closed.", so a rejection here
+    // becomes an unhandled rejection and, under Node's default
+    // --unhandled-rejections=throw, kills the API process.
+    const fakeSubscriber = {
+      subscribe: vi.fn(async () => {}),
+      quit: vi.fn(async () => {
+        throw new Error("Connection is closed.");
+      }),
+      on: vi.fn(),
+    };
+    const redis = { duplicate: vi.fn(() => fakeSubscriber) } as unknown as Redis;
+
+    const unsubscribe = await createLiveSubscriber(redis, testLogger())(() => {});
+
+    await expect(unsubscribe()).resolves.toBeUndefined();
+    expect(fakeSubscriber.quit).toHaveBeenCalled();
   });
 
   it("does not quit the connection on a successful subscribe, and relays messages", async () => {
@@ -128,7 +209,7 @@ describe("createLiveSubscriber", () => {
     const redis = { duplicate: vi.fn(() => fakeSubscriber) } as unknown as Redis;
 
     const onMessage = vi.fn();
-    const unsubscribe = await createLiveSubscriber(redis)(onMessage);
+    const unsubscribe = await createLiveSubscriber(redis, testLogger())(onMessage);
 
     expect(quit).not.toHaveBeenCalled();
 

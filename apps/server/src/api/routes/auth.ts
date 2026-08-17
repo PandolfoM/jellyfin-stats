@@ -3,8 +3,11 @@ import { JellyfinAuthError } from "@jfstats/jellyfin";
 import type { Context, Env, Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { z } from "zod";
-import type { SessionStore } from "../sessions.js";
+import type { SessionRecord, SessionStore } from "../sessions.js";
 import type { RateLimiter } from "../rate-limit.js";
+
+/** The context variable requireAdmin populates; /api/auth/me reads it. */
+export type SessionEnv = { Variables: { session: SessionRecord } };
 
 export const SESSION_COOKIE = "jfstats_session";
 
@@ -36,7 +39,10 @@ const loginSchema = z.object({
   password: z.string().min(1),
 });
 
-export function registerAuthRoutes<E extends Env>(app: Hono<E>, deps: AuthDeps): void {
+export function registerAuthRoutes<E extends Env & SessionEnv>(
+  app: Hono<E>,
+  deps: AuthDeps,
+): void {
   app.post("/api/auth/login", async (c) => {
     const clientKey = resolveClientKey(c, deps);
 
@@ -114,13 +120,14 @@ export function registerAuthRoutes<E extends Env>(app: Hono<E>, deps: AuthDeps):
     return c.json({ ok: true });
   });
 
-  app.get("/api/auth/me", async (c) => {
-    const id = getCookie(c, SESSION_COOKIE);
-    const session = id === undefined ? null : await deps.sessions.get(id);
-
-    if (session === null) {
-      return c.json({ error: "unauthenticated" }, 401);
-    }
+  // No session lookup of its own: requireAdmin (mounted in api/app.ts) is the
+  // single gate, and it is what re-checks isAdmin and refreshes both sides of
+  // the session — the Redis TTL and the browser cookie. Reading the store
+  // directly here slid the TTL without re-issuing the cookie, so a client
+  // polling only this route kept its server-side session alive while its own
+  // cookie expired on the maxAge fixed at login.
+  app.get("/api/auth/me", (c) => {
+    const session = c.get("session");
 
     return c.json({
       userId: session.userId,
