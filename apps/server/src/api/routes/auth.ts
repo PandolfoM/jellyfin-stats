@@ -1,3 +1,4 @@
+import { getConnInfo } from "@hono/node-server/conninfo";
 import { JellyfinAuthError } from "@jfstats/jellyfin";
 import type { Context, Env, Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
@@ -20,6 +21,9 @@ export interface AuthDeps {
   cookieSecure: boolean;
   sessionTtlHours: number;
   fallbackAdmin: { username: string; password: string } | null;
+  // Off unless a reverse proxy that actually sets X-Forwarded-For sits in
+  // front of the app. See resolveClientKey for why this gates the header.
+  trustProxyHeaders: boolean;
 }
 
 const loginSchema = z.object({
@@ -29,8 +33,7 @@ const loginSchema = z.object({
 
 export function registerAuthRoutes<E extends Env>(app: Hono<E>, deps: AuthDeps): void {
   app.post("/api/auth/login", async (c) => {
-    const clientKey =
-      c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? "unknown";
+    const clientKey = resolveClientKey(c, deps);
 
     const limit = await deps.rateLimiter.check(clientKey);
     if (!limit.allowed) {
@@ -66,10 +69,16 @@ export function registerAuthRoutes<E extends Env>(app: Hono<E>, deps: AuthDeps):
     try {
       result = await deps.authenticateByName(username, password);
     } catch (error) {
-      if (error instanceof JellyfinAuthError && error.kind === "invalid_credentials") {
-        return c.json({ error: "invalid_credentials" }, 401);
+      if (error instanceof JellyfinAuthError) {
+        if (error.kind === "invalid_credentials") {
+          return c.json({ error: "invalid_credentials" }, 401);
+        }
+        return c.json({ error: "jellyfin_unavailable" }, 503);
       }
-      return c.json({ error: "jellyfin_unavailable" }, 503);
+      // Not a recognized auth failure — a real bug, not a Jellyfin outage.
+      // Rethrow so it reaches app.onError, gets logged, and answers 500
+      // rather than being mislabelled as "jellyfin_unavailable".
+      throw error;
     }
 
     // Revoke regardless of the admin decision — we asked Jellyfin for a token we
@@ -114,6 +123,42 @@ export function registerAuthRoutes<E extends Env>(app: Hono<E>, deps: AuthDeps):
       isAdmin: session.isAdmin,
     });
   });
+}
+
+/**
+ * X-Forwarded-For is whatever the client sends unless something in front of
+ * this app overwrites it. Trusting it unconditionally lets an attacker mint a
+ * fresh rate-limit identity on every request (header-set) while pooling every
+ * legitimate caller into one "unknown" bucket when nobody sets it at all
+ * (worse than no mitigation). So: the header is only consulted when the
+ * deployment has explicitly said a real proxy is in front of it. Otherwise
+ * the key is the TCP connection's own remote address, which the client does
+ * not control.
+ */
+function resolveClientKey<E extends Env>(c: Context<E>, deps: AuthDeps): string {
+  if (deps.trustProxyHeaders) {
+    const forwarded = c.req.header("x-forwarded-for")?.split(",")[0]?.trim();
+    if (forwarded !== undefined && forwarded.length > 0) {
+      return forwarded;
+    }
+    const realIp = c.req.header("x-real-ip");
+    if (realIp !== undefined && realIp.length > 0) {
+      return realIp;
+    }
+    return "unknown";
+  }
+
+  // Last resort only: reachable when this isn't served through
+  // @hono/node-server (e.g. a bare test harness with no connection bound).
+  try {
+    const address = getConnInfo(c).remote.address;
+    if (address !== undefined && address.length > 0) {
+      return address;
+    }
+  } catch {
+    // fall through
+  }
+  return "unknown";
 }
 
 function writeSessionCookie<E extends Env>(c: Context<E>, id: string, deps: AuthDeps): void {

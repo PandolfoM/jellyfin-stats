@@ -18,6 +18,7 @@ function build(overrides: Partial<AuthDeps> = {}) {
     cookieSecure: false,
     sessionTtlHours: 168,
     fallbackAdmin: null,
+    trustProxyHeaders: false,
     ...overrides,
   };
 
@@ -144,6 +145,86 @@ describe("POST /api/auth/login", () => {
     const response = await login(app, { username: "admin", password: "hunter2" });
 
     expect(await response.text()).not.toContain("hunter2");
+  });
+
+  it("re-throws an unrecognized error from authenticateByName instead of mapping it to 503", async () => {
+    const { app } = build({
+      authenticateByName: vi.fn(async () => {
+        throw new Error("boom");
+      }),
+    });
+
+    const response = await login(app, { username: "admin", password: "secret" });
+
+    // No onError is registered on this bare test app, so an unhandled error
+    // falls through to Hono's own default handler: a plain 500, not our 503
+    // "jellyfin_unavailable" mapping used for a real Jellyfin outage.
+    expect(response.status).toBe(500);
+    expect(await response.text()).toBe("Internal Server Error");
+  });
+});
+
+describe("rate limiter client key", () => {
+  const CONN = (remoteAddress: string) => ({ incoming: { socket: { remoteAddress } } });
+
+  it("keys by the connection address, not a forged X-Forwarded-For, when proxy trust is disabled", async () => {
+    const { app, deps } = build({ trustProxyHeaders: false });
+
+    await app.request(
+      "/api/auth/login",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Forwarded-For": "203.0.113.99" },
+        body: JSON.stringify({ username: "admin", password: "secret" }),
+      },
+      CONN("198.51.100.7"),
+    );
+
+    // If the header were still trusted by default, this would be
+    // "203.0.113.99" instead — a value the caller supplied themselves.
+    expect(deps.rateLimiter.check).toHaveBeenCalledWith("198.51.100.7");
+  });
+
+  it("uses the first X-Forwarded-For entry when proxy trust is enabled", async () => {
+    const { app, deps } = build({ trustProxyHeaders: true });
+
+    await app.request(
+      "/api/auth/login",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": "203.0.113.99, 10.0.0.1",
+        },
+        body: JSON.stringify({ username: "admin", password: "secret" }),
+      },
+      CONN("198.51.100.7"),
+    );
+
+    // If trust were ignored, this would be the connection address instead.
+    expect(deps.rateLimiter.check).toHaveBeenCalledWith("203.0.113.99");
+  });
+
+  it("gives two different connection addresses independent buckets", async () => {
+    const { app, deps } = build({ trustProxyHeaders: false });
+    const attempt = (body: unknown, remoteAddress: string) =>
+      app.request(
+        "/api/auth/login",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        CONN(remoteAddress),
+      );
+
+    await attempt({ username: "admin", password: "secret" }, "198.51.100.7");
+    await attempt({ username: "admin", password: "secret" }, "198.51.100.8");
+
+    // If both attempts pooled into one shared bucket, these would be equal —
+    // which is exactly the "everyone shares 'unknown'" failure mode.
+    expect(deps.rateLimiter.check).toHaveBeenNthCalledWith(1, "198.51.100.7");
+    expect(deps.rateLimiter.check).toHaveBeenNthCalledWith(2, "198.51.100.8");
   });
 });
 

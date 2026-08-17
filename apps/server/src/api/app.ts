@@ -24,6 +24,7 @@ export function createApp(context: AppContext) {
     rateLimiter,
     cookieSecure: context.env.COOKIE_SECURE,
     sessionTtlHours: context.env.SESSION_TTL_HOURS,
+    trustProxyHeaders: context.env.TRUST_PROXY_HEADERS,
     fallbackAdmin:
       context.env.fallbackAdminEnabled &&
       context.env.FALLBACK_ADMIN_USER !== undefined &&

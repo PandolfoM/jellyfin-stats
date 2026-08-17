@@ -8,6 +8,7 @@ function testContext(): AppContext {
       LOG_LEVEL: "error",
       COOKIE_SECURE: false,
       SESSION_TTL_HOURS: 168,
+      TRUST_PROXY_HEADERS: false,
       fallbackAdminEnabled: false,
     },
     redis: {},

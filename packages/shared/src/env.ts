@@ -23,6 +23,14 @@ const schema = z.object({
     .catch("false")
     .transform((value) => value === "true"),
   SESSION_TTL_HOURS: z.coerce.number().int().positive().default(168),
+  // Off by default: X-Forwarded-For is client-settable, so trusting it without a
+  // reverse proxy in front lets any client mint a fresh rate-limit identity on
+  // every request. Turn this on only when a proxy that actually sets/overwrites
+  // the header sits in front of the app.
+  TRUST_PROXY_HEADERS: z
+    .enum(["true", "false"])
+    .catch("false")
+    .transform((value) => value === "true"),
 });
 
 export type AppEnv = z.infer<typeof schema> & {

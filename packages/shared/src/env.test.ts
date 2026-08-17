@@ -73,4 +73,12 @@ describe("cookie and session configuration", () => {
   it("rejects a non-positive session lifetime", () => {
     expect(() => loadEnv({ ...valid, SESSION_TTL_HOURS: "0" })).toThrow(/SESSION_TTL_HOURS/);
   });
+
+  it("defaults TRUST_PROXY_HEADERS to false, so a direct unproxied deployment isn't spoofable", () => {
+    expect(loadEnv(valid).TRUST_PROXY_HEADERS).toBe(false);
+  });
+
+  it("accepts the string 'true' from a .env file for TRUST_PROXY_HEADERS", () => {
+    expect(loadEnv({ ...valid, TRUST_PROXY_HEADERS: "true" }).TRUST_PROXY_HEADERS).toBe(true);
+  });
 });
