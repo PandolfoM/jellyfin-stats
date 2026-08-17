@@ -172,7 +172,7 @@ export function createJellyfinClient(options: JellyfinClientOptions): JellyfinCl
         body: JSON.stringify({ Username: username, Pw: password }),
         signal: AbortSignal.timeout(timeoutMs),
       });
-    } catch (cause) {
+    } catch {
       throw new JellyfinAuthError("unreachable", "Could not reach Jellyfin");
     }
 
@@ -184,7 +184,18 @@ export function createJellyfinClient(options: JellyfinClientOptions): JellyfinCl
       throw new JellyfinAuthError("unreachable", `Jellyfin returned ${response.status}`);
     }
 
-    const parsed = authResponseSchema.safeParse(await response.json());
+    // A 200 does not guarantee a JSON body — a proxy in front of Jellyfin could return
+    // an HTML maintenance page, or the body could be empty or truncated. That is a
+    // server problem, not a credentials problem, so it must classify as unreachable
+    // rather than let a raw SyntaxError escape unclassified.
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      throw new JellyfinAuthError("unreachable", "Jellyfin returned a non-JSON response");
+    }
+
+    const parsed = authResponseSchema.safeParse(body);
 
     if (!parsed.success) {
       throw new JellyfinAuthError("unreachable", "Unexpected authentication response");

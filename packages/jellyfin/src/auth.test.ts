@@ -26,6 +26,18 @@ function clientWith(payload: unknown, status = 200) {
   return { client, fetchMock };
 }
 
+/** Same as clientWith, but the response body is a raw string rather than JSON —
+ * for exercising the "200 with a body that isn't JSON at all" path. */
+function clientWithRawBody(rawBody: string, status = 200) {
+  const fetchMock = vi.fn<typeof fetch>(async () => new Response(rawBody, { status }));
+  const client = createJellyfinClient({
+    baseUrl: "http://jellyfin.test:8096",
+    apiKey: "test-key",
+    fetch: fetchMock as unknown as typeof fetch,
+  });
+  return { client, fetchMock };
+}
+
 afterEach(() => vi.restoreAllMocks());
 
 describe("authenticateByName", () => {
@@ -72,6 +84,14 @@ describe("authenticateByName", () => {
     });
   });
 
+  it("reports a 403 as invalid_credentials too — both statuses hit the same branch", async () => {
+    const { client } = clientWith({}, 403);
+
+    await expect(client.authenticateByName("test-admin", "wrong")).rejects.toMatchObject({
+      kind: "invalid_credentials",
+    });
+  });
+
   it("reports an unreachable server as unreachable, not as a bad password", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => {
       throw new TypeError("fetch failed");
@@ -89,6 +109,29 @@ describe("authenticateByName", () => {
 
   it("treats a 500 from Jellyfin as unreachable rather than invalid credentials", async () => {
     const { client } = clientWith({}, 500);
+
+    await expect(client.authenticateByName("test-admin", "secret")).rejects.toMatchObject({
+      kind: "unreachable",
+    });
+  });
+
+  it("treats a 200 with a non-JSON body as unreachable, not as a parse crash", async () => {
+    // A proxy in front of Jellyfin (or Jellyfin itself under a maintenance page) can
+    // answer 200 with a body that isn't JSON at all. That must classify as unreachable,
+    // not escape as a raw SyntaxError that the login route's kind-narrowing can't catch.
+    const { client } = clientWithRawBody("not json", 200);
+
+    await expect(client.authenticateByName("test-admin", "secret")).rejects.toMatchObject({
+      kind: "unreachable",
+    });
+    await expect(client.authenticateByName("test-admin", "secret")).rejects.toBeInstanceOf(JellyfinAuthError);
+  });
+
+  it("treats valid JSON that fails the schema as unreachable", async () => {
+    // Documents the neighbouring path: a 200 with well-formed JSON that doesn't match
+    // authResponseSchema (e.g. missing AccessToken) is a shape problem, not a
+    // credentials problem.
+    const { client } = clientWith({ User: { Id: "u1", Name: "n" } }, 200);
 
     await expect(client.authenticateByName("test-admin", "secret")).rejects.toMatchObject({
       kind: "unreachable",
@@ -130,10 +173,26 @@ describe("revokeToken", () => {
     expect(headers.Authorization).toContain('Token="fabricated-access-token"');
   });
 
-  it("does not throw when revocation fails", async () => {
+  it("does not throw when Jellyfin answers with a non-2xx status", async () => {
     const { client } = clientWith({}, 500);
 
     // Revocation is best-effort cleanup; a failure must not break the user's login.
+    // Note: fetch does not throw for non-2xx responses, so this alone cannot prove the
+    // try/catch in revokeToken does anything — see the next test for that proof.
+    await expect(client.revokeToken("fabricated-access-token")).resolves.toBeUndefined();
+  });
+
+  it("does not throw when the request itself fails (network error, timeout, abort)", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      throw new TypeError("fetch failed");
+    });
+    const client = createJellyfinClient({
+      baseUrl: "http://jellyfin.test:8096",
+      apiKey: "test-key",
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+
+    // This is the failure mode the try/catch in revokeToken actually guards against.
     await expect(client.revokeToken("fabricated-access-token")).resolves.toBeUndefined();
   });
 });
