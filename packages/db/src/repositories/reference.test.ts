@@ -76,4 +76,27 @@ describe("reference repositories", () => {
       expect(rows[0]?.archived).toBe(false);
     });
   });
+
+  it("un-archives an item that reappears after being archived", async () => {
+    await withTestDatabase(async (db) => {
+      await upsertItems(db, [
+        { id: "i1", type: "Movie", name: "Kept", libraryId: "lib1" },
+        { id: "i2", type: "Movie", name: "Returned", libraryId: "lib1" },
+      ]);
+
+      // Archive i2 by reporting only i1 as present.
+      await archiveMissingItems(db, ["i1"]);
+      let rows = await db.select().from(items).orderBy(items.id);
+      expect(rows[1]).toMatchObject({ id: "i2", archived: true });
+
+      // Reappear i2 in the next sync.
+      await upsertItems(db, [
+        { id: "i1", type: "Movie", name: "Kept", libraryId: "lib1" },
+        { id: "i2", type: "Movie", name: "Returned", libraryId: "lib1" },
+      ]);
+
+      rows = await db.select().from(items).orderBy(items.id);
+      expect(rows[1]).toMatchObject({ id: "i2", archived: false });
+    });
+  });
 });
