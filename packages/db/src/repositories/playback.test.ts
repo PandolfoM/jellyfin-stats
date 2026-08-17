@@ -257,4 +257,111 @@ describe("playback repositories", () => {
       expect(rows).toEqual([]);
     });
   });
+
+  it("recomputes non-midnight-aligned bounds without dropping or duplicating a day", async () => {
+    await withTestDatabase(async (db) => {
+      const day1Start = new Date("2026-08-16T10:00:00Z");
+      const day1Second = new Date("2026-08-16T11:00:00Z");
+      const day2Start = new Date("2026-08-17T10:00:00Z");
+
+      await db.insert(playbackSessions).values([
+        {
+          playSessionId: "d1-1",
+          itemId: "item-1",
+          userId: "user-1",
+          startedAt: day1Start,
+          lastSeenAt: day1Start,
+          endedAt: new Date(day1Start.getTime() + 60_000),
+          watchMs: 1_000,
+        },
+        {
+          playSessionId: "d1-2",
+          itemId: "item-1",
+          userId: "user-1",
+          startedAt: day1Second,
+          lastSeenAt: day1Second,
+          endedAt: new Date(day1Second.getTime() + 60_000),
+          watchMs: 2_000,
+        },
+        {
+          playSessionId: "d2-1",
+          itemId: "item-1",
+          userId: "user-1",
+          startedAt: day2Start,
+          lastSeenAt: day2Start,
+          endedAt: new Date(day2Start.getTime() + 60_000),
+          watchMs: 3_000,
+        },
+      ]);
+
+      // Neither bound sits on a UTC day boundary — this is the shape every real caller
+      // uses (a 7-day lookback from "now", a seed script's relative dates, tests that
+      // straddle midnight).
+      const from = new Date("2026-08-16T05:00:00Z");
+      const to = new Date("2026-08-17T05:00:00Z");
+
+      await recomputeRollupRange(db, from, to);
+
+      const firstPass = await db.select().from(playbackRollupDaily).orderBy(playbackRollupDaily.day);
+      expect(firstPass).toHaveLength(2);
+      expect(firstPass[0]).toMatchObject({ day: "2026-08-16", playCount: 2, watchMs: 3_000 });
+      expect(firstPass[1]).toMatchObject({ day: "2026-08-17", playCount: 1, watchMs: 3_000 });
+
+      // A second recompute over the identical non-aligned bounds must not collide with
+      // the rows the first pass just wrote. Before the fix, the DELETE and INSERT
+      // disagreed on which days were "in range", so this call threw a primary-key
+      // violation instead of cleanly replacing the rows.
+      await recomputeRollupRange(db, from, to);
+
+      const secondPass = await db.select().from(playbackRollupDaily).orderBy(playbackRollupDaily.day);
+      expect(secondPass).toHaveLength(2);
+      expect(secondPass[0]).toMatchObject({ day: "2026-08-16", playCount: 2, watchMs: 3_000 });
+      expect(secondPass[1]).toMatchObject({ day: "2026-08-17", playCount: 1, watchMs: 3_000 });
+    });
+  });
+
+  it("removes an orphaned rollup row on the boundary day even when bounds aren't midnight-aligned", async () => {
+    await withTestDatabase(async (db) => {
+      // Seeded on the day that only the *ceiled* upper bound reaches — a day with no
+      // sessions at all, so recompute must still delete it.
+      await applyRollupDelta(db, {
+        day: "2026-08-17",
+        userId: "ghost",
+        itemId: "item-x",
+        libraryId: null,
+        playCount: 5,
+        watchMs: 500,
+      });
+
+      await recomputeRollupRange(db, new Date("2026-08-16T05:00:00Z"), new Date("2026-08-17T05:00:00Z"));
+
+      const rows = await db.select().from(playbackRollupDaily);
+      expect(rows).toEqual([]);
+    });
+  });
+
+  it("keeps a known libraryId when a later delta for the same key doesn't know it", async () => {
+    await withTestDatabase(async (db) => {
+      await applyRollupDelta(db, {
+        day: "2026-08-16",
+        userId: "user-1",
+        itemId: "item-1",
+        libraryId: "lib-1",
+        playCount: 1,
+        watchMs: 1_000,
+      });
+      await applyRollupDelta(db, {
+        day: "2026-08-16",
+        userId: "user-1",
+        itemId: "item-1",
+        libraryId: null,
+        playCount: 1,
+        watchMs: 1_000,
+      });
+
+      const rows = await db.select().from(playbackRollupDaily);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ libraryId: "lib-1", playCount: 2, watchMs: 2_000 });
+    });
+  });
 });

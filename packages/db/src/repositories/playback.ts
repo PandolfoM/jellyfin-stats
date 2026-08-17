@@ -173,19 +173,57 @@ export async function applyRollupDelta(db: Db, input: RollupDelta): Promise<void
     });
 }
 
+function toUtcDayString(at: Date): string {
+  return at.toISOString().slice(0, 10);
+}
+
+function utcDayStart(day: string): Date {
+  return new Date(`${day}T00:00:00.000Z`);
+}
+
+function isUtcDayStart(at: Date): boolean {
+  return at.getTime() === utcDayStart(toUtcDayString(at)).getTime();
+}
+
+/** The UTC day string one day after `day`. */
+function nextUtcDayString(day: string): string {
+  const next = utcDayStart(day);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return toUtcDayString(next);
+}
+
 /**
  * Rebuilds the rollup for `[from, to)` directly from playback_sessions, correcting any
  * drift from lost or double-applied incremental writes. Deleting the range first is
  * what lets it remove rows whose sessions no longer exist.
+ *
+ * The range is half-open on whole UTC days, not on the raw instants passed in: any
+ * `from`/`to` that falls inside a day pulls that entire day into the recompute. `from`
+ * is floored to the start of its day (the WHERE clause already covers the rest of that
+ * day). `to` is ceiled to the start of the *next* day unless it already lands exactly
+ * on a day boundary, so that a `to` of, say, 05:00 still pulls its whole day in rather
+ * than rebuilding it from a partial slice. Both the DELETE and the INSERT are derived
+ * from these same normalized day boundaries, so they always cover an identical set of
+ * days — otherwise the INSERT can try to write a day the DELETE never cleared, which
+ * throws a primary-key violation (or, if no prior row existed, silently writes a
+ * partial day).
  */
 export async function recomputeRollupRange(db: Db, from: Date, to: Date): Promise<void> {
+  const fromDay = toUtcDayString(from);
+  const toDay = isUtcDayStart(to) ? toUtcDayString(to) : nextUtcDayString(toUtcDayString(to));
+  const fromDayStart = utcDayStart(fromDay);
+  const toDayStart = utcDayStart(toDay);
+
   await db.transaction(async (tx) => {
     await tx.execute(sql`
       DELETE FROM ${playbackRollupDaily}
-      WHERE ${playbackRollupDaily.day} >= ${from.toISOString().slice(0, 10)}
-        AND ${playbackRollupDaily.day} <  ${to.toISOString().slice(0, 10)}
+      WHERE ${playbackRollupDaily.day} >= ${fromDay}
+        AND ${playbackRollupDaily.day} <  ${toDay}
     `);
 
+    // A bare timestamp comparison (rather than casting started_at to a date) lets this
+    // use the user/item + started_at indexes instead of forcing a scan. The normalized
+    // fromDayStart/toDayStart bounds make it cover exactly the same days as the DELETE.
     await tx.execute(sql`
       INSERT INTO ${playbackRollupDaily} (day, user_id, item_id, library_id, play_count, watch_ms)
       SELECT
@@ -197,9 +235,12 @@ export async function recomputeRollupRange(db: Db, from: Date, to: Date): Promis
         coalesce(sum(${playbackSessions.watchMs}), 0) AS watch_ms
       FROM ${playbackSessions}
       LEFT JOIN ${items} ON ${items.id} = ${playbackSessions.itemId}
-      WHERE ${playbackSessions.startedAt} >= ${from}
-        AND ${playbackSessions.startedAt} <  ${to}
-      GROUP BY 1, 2, 3
+      WHERE ${playbackSessions.startedAt} >= ${fromDayStart}
+        AND ${playbackSessions.startedAt} <  ${toDayStart}
+      GROUP BY
+        (${playbackSessions.startedAt} AT TIME ZONE 'UTC')::date,
+        ${playbackSessions.userId},
+        ${playbackSessions.itemId}
     `);
   });
 }
