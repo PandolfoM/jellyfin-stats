@@ -55,9 +55,38 @@ To populate the database with 90 days of fake history instead of a live server:
 pnpm --filter @jfstats/server seed
 ```
 
-The seed script is idempotent: it deletes only the `seed-`-prefixed rows it
-previously wrote before inserting a fresh batch, so re-running it is safe and
-it never touches data synced from a real Jellyfin server.
+The seed script is idempotent, and re-running it is safe. What it does, in order:
+
+1. Deletes the `seed-`-prefixed sessions and `seed-user-`-prefixed rollup rows it
+   previously wrote. This part is scoped strictly to its own rows and cannot match
+   data synced from a real Jellyfin server.
+2. Upserts its fake users, libraries, items, and sessions.
+3. **Rebuilds every daily rollup for the last 93 days from `playback_sessions`** —
+   not only its own. This runs the same `recomputeRollupRange` the nightly job uses,
+   which deletes all `playback_rollup_daily` rows in that window and rebuilds them
+   from the underlying sessions. Real rollup rows in that window are therefore
+   rewritten, not preserved.
+
+Step 3 is non-destructive in effect — the rebuild is derived from `playback_sessions`,
+which the seed never deletes from except for its own rows, so real rollups come back
+with the same numbers. But it does rewrite real rows, and it is a full delete-and-
+rebuild while it runs. Point the seed at a development database, not one holding
+history you care about.
+
+### Repairing rollups over an arbitrary range
+
+The nightly job only rebuilds the trailing 7 days. If rollups have drifted further
+back than that — the worker was down for over a week, or the database was restored
+from an older dump — rebuild an explicit range from `playback_sessions`:
+
+```bash
+pnpm --filter @jfstats/server backfill --from 2026-08-10 --to 2026-08-17
+```
+
+Both dates are `YYYY-MM-DD` and are interpreted as UTC day starts. The range covers
+whole UTC days; passing the same date for both rebuilds exactly that day. This touches
+only `playback_rollup_daily` and reads `playback_sessions`, so unlike the seed it adds
+no fake data.
 
 ## Configuration
 
@@ -90,6 +119,14 @@ stream is unpaused, and each increment is capped at 1.5× the poll interval. See
 not affect it, and a stalled worker cannot inflate it.
 
 Daily totals live in `playback_rollup_daily`, written incrementally as sessions progress
-and end. A nightly job rebuilds the trailing days from `playback_sessions` to correct any
-drift, so the two paths always agree — including for sessions that cross midnight, which
-are attributed entirely to the day the stream started.
+and end. A nightly job rebuilds the trailing 7 whole UTC days from `playback_sessions` to
+correct any drift, so the two paths always agree — including for sessions that cross
+midnight, which are attributed entirely to the day the stream started.
+
+Agreement rests on both paths applying the same two rules:
+
+- **A play is counted once, when the session ends.** A stream still running is not yet a
+  play, in either path. Sessions closed by startup reconciliation count too — that is
+  still a session ending.
+- **Watch time accrues as it is observed**, so a session that is still open already
+  contributes the time it has accumulated so far.
