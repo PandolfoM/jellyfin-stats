@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc --build",
-    "dev:worker": "tsx --env-file=../../.env src/worker.ts"
+    "dev:worker": "tsx --env-file=../../.env src/worker.ts",
+    "seed": "tsx --env-file=../../.env src/seed.ts"
   },
   "dependencies": {
     "@jfstats/db": "workspace:*",
