@@ -15,7 +15,6 @@ export function createLogger(level: string, destination?: DestinationStream) {
       paths: [
         "apiKey",
         "JELLYFIN_API_KEY",
-        "SESSION_SECRET",
         "*.apiKey",
         "headers.authorization",
         "headers.Authorization",

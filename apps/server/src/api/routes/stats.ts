@@ -1,3 +1,4 @@
+import { MAX_TOP_ITEMS as DB_MAX_TOP_ITEMS } from "@jfstats/db";
 import type { DateRange, LibraryStat, OverviewStats, SeriesPoint, TopItem, UserDetail, UserStat } from "@jfstats/db";
 import type { Context, Env, Hono } from "hono";
 
@@ -12,7 +13,22 @@ export interface StatsDeps {
 
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const DEFAULT_RANGE_DAYS = 30;
-export const MAX_TOP_ITEMS = 100;
+const MS_PER_DAY = 86_400_000;
+
+/**
+ * Longest span any stats route will accept, inclusive of both endpoints.
+ *
+ * Not arbitrary caution: getWatchTimeSeries builds its day spine with
+ * generate_series, so `from=0001-01-01&to=9999-12-31` asks Postgres to
+ * materialise ~3.65 million rows for one request. Everything here sits behind
+ * the admin gate, so this is not a public denial of service — but it is
+ * foundation code that Plan 3's date picker feeds directly, and ~2.7 years is
+ * already far past what a daily-rollup dashboard plots.
+ */
+export const MAX_RANGE_DAYS = 1000;
+
+/** Re-exported from the repository, which is where the clamp is enforced. */
+export const MAX_TOP_ITEMS = DB_MAX_TOP_ITEMS;
 
 export class InvalidRangeError extends Error {}
 
@@ -45,6 +61,14 @@ export function parseRange(
 
   if (from > to) {
     throw new InvalidRangeError("from must not be after to");
+  }
+
+  // Both endpoints already round-tripped through Date above, so this arithmetic
+  // is on real UTC midnights; +1 makes the span inclusive of both days.
+  const spanDays =
+    (Date.parse(`${to}T00:00:00.000Z`) - Date.parse(`${from}T00:00:00.000Z`)) / MS_PER_DAY + 1;
+  if (spanDays > MAX_RANGE_DAYS) {
+    throw new InvalidRangeError(`Range spans ${spanDays} days; the maximum is ${MAX_RANGE_DAYS}`);
   }
 
   return { from, to };

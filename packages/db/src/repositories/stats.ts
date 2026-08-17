@@ -1,6 +1,10 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "../client.js";
 import { items, playbackRollupDaily } from "../schema.js";
+
+/** Largest page getTopItems will return, however large a limit is asked for. */
+export const MAX_TOP_ITEMS = 100;
+const DEFAULT_TOP_ITEMS = 10;
 
 /** Inclusive `YYYY-MM-DD` UTC days. */
 export interface DateRange {
@@ -79,6 +83,11 @@ export async function getWatchTimeSeries(db: Db, range: DateRange): Promise<Seri
   }));
 }
 
+function clampTopItemsLimit(limit: number): number {
+  if (!Number.isFinite(limit)) return DEFAULT_TOP_ITEMS;
+  return Math.min(Math.max(1, Math.trunc(limit)), MAX_TOP_ITEMS);
+}
+
 export async function getTopItems(
   db: Db,
   range: DateRange,
@@ -119,8 +128,15 @@ export async function getTopItems(
       items.seriesId,
       items.imageTag,
     )
-    .orderBy(desc(sql`sum(${playbackRollupDaily.watchMs})`))
-    .limit(options.limit);
+    // Name breaks ties, as in getUserStats and getLibraryStats. Without it, items
+    // with equal watch time come back in whatever order the plan happens to
+    // produce, so the same request can return different rows either side of the
+    // LIMIT — a list that reshuffles between refreshes, and a flaky test.
+    .orderBy(desc(sql`sum(${playbackRollupDaily.watchMs})`), asc(items.name))
+    // Clamped here rather than trusted from the caller, matching getHistory: an
+    // unbounded limit from a query string should never reach the database, and
+    // Math.min/Math.max propagate NaN rather than clamping it.
+    .limit(clampTopItemsLimit(options.limit));
 
   return rows.map((row) => ({ ...row, plays: Number(row.plays), watchMs: Number(row.watchMs) }));
 }

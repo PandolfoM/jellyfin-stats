@@ -51,3 +51,51 @@ describe("rate limiter", () => {
     expect(ttl).toBeLessThanOrEqual(42);
   });
 });
+
+/**
+ * A real container cannot be made to fail one command inside a MULTI on demand,
+ * so these drive the reply shape ioredis produces directly: `[error, result]`
+ * per command, with a failed INCR arriving as `[err, null]`.
+ */
+function redisReplying(replies: [Error | null, unknown][] | null): Redis {
+  return {
+    multi: () => ({
+      incr: () => ({
+        expire: () => ({
+          exec: async () => replies,
+        }),
+      }),
+    }),
+  } as unknown as Redis;
+}
+
+describe("rate limiter under a Redis fault", () => {
+  it("denies the request when INCR reports an error", async () => {
+    // The count was previously read as Number(reply?.[1] ?? 0) — 0 for a failed
+    // INCR, which compares as under the limit and ALLOWED the request. A Redis
+    // fault therefore switched login throttling off silently, at exactly the
+    // moment an attacker would want it off.
+    const limiter = createRateLimiter(redisReplying([[new Error("READONLY"), null]]), {
+      limit: 10,
+      windowSeconds: 900,
+    });
+
+    expect(await limiter.check("198.51.100.12")).toEqual({ allowed: false, remaining: 0 });
+  });
+
+  it("denies the request when the transaction returns no replies at all", async () => {
+    // ioredis resolves exec() to null when the MULTI was discarded.
+    const limiter = createRateLimiter(redisReplying(null), { limit: 10, windowSeconds: 900 });
+
+    expect(await limiter.check("198.51.100.13")).toEqual({ allowed: false, remaining: 0 });
+  });
+
+  it("denies the request when INCR succeeds but the count is not a number", async () => {
+    const limiter = createRateLimiter(redisReplying([[null, "not-a-count"]]), {
+      limit: 10,
+      windowSeconds: 900,
+    });
+
+    expect(await limiter.check("198.51.100.14")).toEqual({ allowed: false, remaining: 0 });
+  });
+});

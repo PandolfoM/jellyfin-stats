@@ -12,16 +12,20 @@ The web UI (Plan 3) is not built yet.
 
 ## Requirements
 
-- Docker and Docker Compose
-- Node 22+ and pnpm 10+ for development
+- Docker and Docker Compose — **for Postgres and Redis only**. There is no
+  production image for this app yet. `docker compose up` starts the two
+  datastores and nothing else.
+- Node 22+ and pnpm 10+ — required to *run* the app, not just to develop it. Both
+  long-running processes (the sync worker and the HTTP API) run on the host under
+  `tsx`, started by hand or by whatever supervisor you point at them. There is no
+  packaged deployment yet.
 - A Jellyfin server and an API key (Jellyfin: Dashboard → API Keys)
 
 ## Setup
 
 ```bash
 cp .env.example .env
-# Fill in JELLYFIN_URL, JELLYFIN_API_KEY, POSTGRES_PASSWORD, and SESSION_SECRET.
-# Generate a secret with: openssl rand -hex 32
+# Fill in JELLYFIN_URL, JELLYFIN_API_KEY, and POSTGRES_PASSWORD.
 ```
 
 `.env` is gitignored. Never commit real credentials.
@@ -99,7 +103,8 @@ no fake data.
 | `JELLYFIN_API_KEY` | — | Jellyfin API key used for syncing (required) |
 | `DATABASE_URL` | — | Postgres connection string (required) |
 | `REDIS_URL` | — | Redis connection string (required) |
-| `SESSION_SECRET` | — | 32+ characters, used in Plan 2 (required) |
+| `FALLBACK_ADMIN_USER` | unset | Optional emergency admin username; see [Authentication](#authentication) |
+| `FALLBACK_ADMIN_PASSWORD` | unset | Optional emergency admin password; both must be set to activate |
 | `SESSION_POLL_INTERVAL_MS` | `5000` | How often active sessions are polled |
 | `REFERENCE_SYNC_INTERVAL_MS` | `900000` | How often users and libraries refresh |
 | `COMPLETION_THRESHOLD` | `0.9` | Fraction of runtime that counts as watched |
@@ -131,11 +136,14 @@ cookie.
 |---|---|---|
 | `POST /api/auth/login` | none | Body: `{ "username": "...", "password": "..." }`. Rate-limited to 10 attempts per 15 minutes per client (see `TRUST_PROXY_HEADERS` below). On success: `200` with `{ userId, userName, isAdmin: true }`, and the session cookie is set. Otherwise: `400 invalid_request` (malformed body), `401 invalid_credentials`, `403 not_an_administrator` (a valid Jellyfin login that isn't an admin), `429 too_many_attempts`, or `503 jellyfin_unavailable`. |
 | `POST /api/auth/logout` | none | Destroys the session and clears the cookie. Always `200 { ok: true }`, even with no session present. |
-| `GET /api/auth/me` | session cookie | `200` with `{ userId, userName, isAdmin }` if the cookie names a live session, else `401 unauthenticated`. |
+| `GET /api/auth/me` | session cookie | `200` with `{ userId, userName, isAdmin }` if the cookie names a live admin session, else `401 unauthenticated`. Goes through the same admin gate as the data routes below, so it re-checks admin status and refreshes both the session and the cookie — polling it keeps a session alive on both sides, not just server-side. |
 
 An optional emergency fallback admin (`FALLBACK_ADMIN_USER` / `FALLBACK_ADMIN_PASSWORD`,
-both required together to activate) is checked before Jellyfin, so it still works when
-Jellyfin itself is unreachable. Leave both unset to disable it.
+both required together to activate, and commented out in `.env.example`) is checked
+before Jellyfin, so it still works when Jellyfin itself is unreachable. Leave both unset
+— the shipped default — to disable it. When set, it is a standing username/password on
+your dashboard that does not expire with a Jellyfin account, so use a long random
+password and remove it once you no longer need the recovery path.
 
 ### Statistics, history, live feed, and images
 
@@ -147,7 +155,9 @@ for use as a liveness check.
 
 `from`/`to` below are `YYYY-MM-DD` UTC calendar days. On the `/api/stats/*` routes,
 omitting either (or both) defaults to the trailing 30 days ending today (UTC). An
-unparsable or out-of-order range answers `400 { "error": "invalid_range" }`.
+unparsable or out-of-order range answers `400 { "error": "invalid_range" }`, as does a
+range spanning more than 1000 days — the day-by-day series is built from a
+`generate_series` spine, so an unbounded span turns one request into millions of rows.
 
 | Endpoint | Query parameters | Notes |
 |---|---|---|

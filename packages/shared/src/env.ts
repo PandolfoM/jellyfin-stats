@@ -8,7 +8,14 @@ const schema = z.object({
   JELLYFIN_API_KEY: z.string().min(1),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
-  SESSION_SECRET: z.string().min(32),
+  // No SESSION_SECRET. Session ids are 32 random bytes stored in Redis, and every
+  // gated request round-trips to Redis to resolve one — that lookup is the
+  // authoritative check, so signing the cookie could never change an outcome (a
+  // correctly-signed id for a destroyed session still fails; an unsigned id for a
+  // live session still succeeds). Requiring one, with a key-generation ritual in
+  // the setup instructions, taught operators it was load-bearing when nothing
+  // read it. This schema is non-strict, so an existing .env that still carries
+  // the line keeps working.
   SESSION_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
   REFERENCE_SYNC_INTERVAL_MS: z.coerce.number().int().positive().default(900_000),
   COMPLETION_THRESHOLD: z.coerce.number().min(0).max(1).default(0.9),

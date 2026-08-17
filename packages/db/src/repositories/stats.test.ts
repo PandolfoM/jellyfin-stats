@@ -6,6 +6,7 @@ import {
   getLibraryStats,
   getOverview,
   getTopItems,
+  MAX_TOP_ITEMS,
   getUserDetail,
   getUserStats,
   getWatchTimeSeries,
@@ -164,6 +165,80 @@ describe("getTopItems", () => {
 
       expect(top.find((row) => row.itemId === "item-1")?.imageTag).toBe("tag-1");
       expect(top.find((row) => row.itemId === "item-2")?.imageTag).toBeNull();
+    });
+  });
+
+  it("breaks a watch-time tie by name, so the order is deterministic", async () => {
+    // Its siblings all have a tiebreak (getUserStats and getLibraryStats order
+    // by name, getHistory by s.id). Without one, rows with equal watch time
+    // come back in whatever order the plan produces, so the same request can
+    // return different rows either side of the LIMIT — a list that reshuffles
+    // between refreshes.
+    await withTestDatabase(async (db) => {
+      await db.insert(libraries).values({ id: "lib-movies", name: "Movies" });
+      await db.insert(jellyfinUsers).values({ id: "user-a", name: "alpha", isAdmin: true });
+      await db.insert(items).values([
+        { id: "item-z", name: "Zulu", type: "Movie", libraryId: "lib-movies" },
+        { id: "item-a", name: "Alpha", type: "Movie", libraryId: "lib-movies" },
+        { id: "item-m", name: "Mike", type: "Movie", libraryId: "lib-movies" },
+      ]);
+      await db.insert(playbackRollupDaily).values([
+        { day: "2026-08-10", userId: "user-a", itemId: "item-z", libraryId: "lib-movies", playCount: 1, watchMs: 5_000 },
+        { day: "2026-08-10", userId: "user-a", itemId: "item-a", libraryId: "lib-movies", playCount: 1, watchMs: 5_000 },
+        { day: "2026-08-10", userId: "user-a", itemId: "item-m", libraryId: "lib-movies", playCount: 1, watchMs: 5_000 },
+      ]);
+
+      const top = await getTopItems(db, RANGE, { limit: 10 });
+
+      expect(top.map((row) => row.name)).toEqual(["Alpha", "Mike", "Zulu"]);
+      // And the tiebreak decides which rows survive the LIMIT, not the plan.
+      expect((await getTopItems(db, RANGE, { limit: 2 })).map((row) => row.name)).toEqual([
+        "Alpha",
+        "Mike",
+      ]);
+    });
+  });
+
+  it("clamps the limit in the repository, not only at the route", async () => {
+    // getHistory clamps in both places; this is the sibling that did not. An
+    // unbounded limit should never reach the database even if a future caller
+    // forgets to clamp, and NaN must not flow into LIMIT and fail at the driver.
+    await withTestDatabase(async (db) => {
+      await seed(db);
+
+      expect(await getTopItems(db, RANGE, { limit: 10_000 })).toHaveLength(3);
+      expect(await getTopItems(db, RANGE, { limit: Number.NaN })).toHaveLength(3);
+      expect(await getTopItems(db, RANGE, { limit: 0 })).toHaveLength(1);
+      expect(await getTopItems(db, RANGE, { limit: -5 })).toHaveLength(1);
+      expect(await getTopItems(db, RANGE, { limit: 2.9 })).toHaveLength(2);
+    });
+  });
+
+  it("never returns more than MAX_TOP_ITEMS rows", async () => {
+    await withTestDatabase(async (db) => {
+      await db.insert(libraries).values({ id: "lib-movies", name: "Movies" });
+      await db.insert(jellyfinUsers).values({ id: "user-a", name: "alpha", isAdmin: true });
+      const many = Array.from({ length: MAX_TOP_ITEMS + 5 }, (_unused, index) => index);
+      await db.insert(items).values(
+        many.map((index) => ({
+          id: `bulk-${index}`,
+          name: `Bulk ${String(index).padStart(3, "0")}`,
+          type: "Movie",
+          libraryId: "lib-movies",
+        })),
+      );
+      await db.insert(playbackRollupDaily).values(
+        many.map((index) => ({
+          day: "2026-08-10",
+          userId: "user-a",
+          itemId: `bulk-${index}`,
+          libraryId: "lib-movies",
+          playCount: 1,
+          watchMs: 1_000 + index,
+        })),
+      );
+
+      expect(await getTopItems(db, RANGE, { limit: 10_000 })).toHaveLength(MAX_TOP_ITEMS);
     });
   });
 });

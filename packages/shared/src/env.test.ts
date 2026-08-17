@@ -6,7 +6,6 @@ const valid = {
   JELLYFIN_API_KEY: "test-key",
   DATABASE_URL: "postgres://u:p@localhost:5432/db",
   REDIS_URL: "redis://localhost:6379",
-  SESSION_SECRET: "a".repeat(64),
 };
 
 describe("loadEnv", () => {
@@ -33,8 +32,20 @@ describe("loadEnv", () => {
     expect(() => loadEnv(missing)).toThrow(/JELLYFIN_API_KEY/);
   });
 
-  it("rejects a session secret shorter than 32 characters", () => {
-    expect(() => loadEnv({ ...valid, SESSION_SECRET: "short" })).toThrow(/SESSION_SECRET/);
+  it("loads without a SESSION_SECRET, which nothing reads", () => {
+    // Session ids are 32 random bytes in Redis and every gated request
+    // round-trips to Redis to resolve one, so there is nothing for a signing
+    // secret to do. It used to be required, with an `openssl rand -hex 32`
+    // ritual in the setup instructions, which taught operators it was
+    // load-bearing. This pins the removal so it cannot creep back.
+    expect(() => loadEnv(valid)).not.toThrow();
+    expect(Object.keys(loadEnv(valid))).not.toContain("SESSION_SECRET");
+  });
+
+  it("still loads when an existing .env carries a SESSION_SECRET line", () => {
+    // Backward compatibility: the schema is a non-strict z.object, so an
+    // operator upgrading in place does not have to edit their .env at all.
+    expect(() => loadEnv({ ...valid, SESSION_SECRET: "a".repeat(64) })).not.toThrow();
   });
 
   it("rejects a completion threshold above 1", () => {

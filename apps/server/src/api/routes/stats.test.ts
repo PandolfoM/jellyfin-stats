@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
-import { parseRange, registerStatsRoutes, type StatsDeps } from "./stats.js";
+import { InvalidRangeError, parseRange, registerStatsRoutes, type StatsDeps } from "./stats.js";
 
 function build(overrides: Partial<StatsDeps> = {}) {
   const deps: StatsDeps = {
@@ -43,6 +43,30 @@ describe("parseRange", () => {
   it("rejects a reversed range", () => {
     expect(() => parseRange({ from: "2026-03-01", to: "2026-01-01" })).toThrow();
   });
+
+  it("rejects a range longer than the cap", () => {
+    // getWatchTimeSeries builds its day spine with generate_series, so this
+    // asks Postgres to materialise ~3.65 million rows for one request. Behind
+    // the admin gate, but Plan 3's date picker feeds this directly.
+    expect(() => parseRange({ from: "0001-01-01", to: "9999-12-31" })).toThrow(InvalidRangeError);
+  });
+
+  it("accepts a range exactly at the cap and rejects one day more", () => {
+    // 2024-01-01 → 2026-09-26 inclusive is exactly 1000 days (2024 is a leap year).
+    expect(parseRange({ from: "2024-01-01", to: "2026-09-26" })).toEqual({
+      from: "2024-01-01",
+      to: "2026-09-26",
+    });
+    expect(() => parseRange({ from: "2024-01-01", to: "2026-09-27" })).toThrow(InvalidRangeError);
+  });
+
+  it("still accepts a single day and the default window", () => {
+    expect(parseRange({ from: "2026-08-10", to: "2026-08-10" })).toEqual({
+      from: "2026-08-10",
+      to: "2026-08-10",
+    });
+    expect(() => parseRange({}, () => Date.parse("2026-08-17T12:00:00Z"))).not.toThrow();
+  });
 });
 
 describe("stats routes", () => {
@@ -67,6 +91,16 @@ describe("stats routes", () => {
     const { app } = build();
 
     expect((await app.request("/api/stats/overview?from=nope&to=2026-08-12")).status).toBe(400);
+  });
+
+  it("answers 400 invalid_range for an unbounded span without querying", async () => {
+    const { app, deps } = build();
+
+    const response = await app.request("/api/stats/series?from=0001-01-01&to=9999-12-31");
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid_range" });
+    expect(deps.getWatchTimeSeries).not.toHaveBeenCalled();
   });
 
   it("clamps the top-items limit", async () => {
