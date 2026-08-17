@@ -23,10 +23,12 @@ const START = new Date("2026-08-16T20:00:00Z").getTime();
 
 function memorySnapshotStore(): SnapshotStore {
   let snapshot: SessionSnapshot = {};
+  let live: LiveSession[] = [];
   return {
     load: async () => snapshot,
     save: async (next) => void (snapshot = next),
-    publish: async () => {},
+    publish: async (sessions) => void (live = sessions),
+    loadLive: async () => live,
   };
 }
 

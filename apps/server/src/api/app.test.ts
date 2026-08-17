@@ -13,8 +13,9 @@ function testContext(): AppContext {
     },
     redis: {},
     // Never opened: an unauthenticated request is rejected by requireAdmin
-    // before any handler touches context.db.
+    // before any handler touches context.db or context.snapshots.
     db: {},
+    snapshots: {},
   } as unknown as AppContext;
 }
 
@@ -65,6 +66,16 @@ describe("createApp", () => {
     const app = createApp(testContext());
 
     const response = await app.request("/api/history");
+
+    expect(response.status).toBe(401);
+  });
+
+  it("rejects an unauthenticated request to the live feed", async () => {
+    // The live feed shows who is watching what, in real time — the same
+    // sensitivity as history, so it must be gated the same way.
+    const app = createApp(testContext());
+
+    const response = await app.request("/api/live");
 
     expect(response.status).toBe(401);
   });

@@ -9,10 +9,12 @@ import {
 } from "@jfstats/db";
 import { Hono } from "hono";
 import type { AppContext } from "../context.js";
+import { LIVE_CHANNEL } from "../sync/snapshot-store.js";
 import { requireAdmin } from "./middleware/auth.js";
 import { createRateLimiter } from "./rate-limit.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHistoryRoutes } from "./routes/history.js";
+import { registerLiveRoute } from "./routes/live.js";
 import { registerStatsRoutes } from "./routes/stats.js";
 import { createSessionStore, type SessionRecord } from "./sessions.js";
 
@@ -56,6 +58,9 @@ export function createApp(context: AppContext) {
 
   app.use("/api/stats/*", requireAdmin(sessions, cookieConfig));
   app.use("/api/history", requireAdmin(sessions, cookieConfig));
+  // The live feed exposes who is watching what, in real time — the same
+  // sensitivity as history, and gated the same way.
+  app.use("/api/live", requireAdmin(sessions, cookieConfig));
 
   registerStatsRoutes(app, {
     getOverview: (range) => getOverview(context.db, range),
@@ -67,6 +72,20 @@ export function createApp(context: AppContext) {
   });
 
   registerHistoryRoutes(app, { getHistory: (options) => getHistory(context.db, options) });
+
+  registerLiveRoute(app, {
+    loadCurrent: () => context.snapshots.loadLive(),
+    subscribe: async (onMessage) => {
+      // A subscribed ioredis client cannot run ordinary commands. Sharing
+      // context.redis would break the session store on the first SSE connection.
+      const subscriber = context.redis.duplicate();
+      await subscriber.subscribe(LIVE_CHANNEL);
+      subscriber.on("message", (_channel, payload) => onMessage(payload));
+      return async () => {
+        await subscriber.quit();
+      };
+    },
+  });
 
   app.notFound((c) => c.json({ error: "not_found" }, 404));
 
