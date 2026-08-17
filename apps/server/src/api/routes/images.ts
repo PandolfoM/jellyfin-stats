@@ -6,10 +6,24 @@ export interface ImageDeps {
 
 export const MAX_IMAGE_WIDTH = 1000;
 const DEFAULT_WIDTH = 400;
-const CACHE_SECONDS = 60 * 60 * 24 * 30;
+export const CACHE_SECONDS = 60 * 60 * 24 * 30;
+
+// Jellyfin item ids are 32-character hex GUIDs (no dashes, as Jellyfin's REST
+// API emits them). Rejecting anything else here — before any outbound
+// request is built — means a path-traversal or URL-fragment payload
+// (e.g. "..%2F..%2FUsers%23", which Hono's router matches as a single
+// :itemId segment and only decodes *after* matching) can never reach the
+// upstream fetch, where it would carry the admin Jellyfin API key to
+// whatever path survived URL parsing instead of the intended image endpoint.
+const ITEM_ID_PATTERN = /^[0-9a-f]{32}$/i;
 
 export function registerImageRoutes<E extends Env>(app: Hono<E>, deps: ImageDeps): void {
   app.get("/api/images/items/:itemId", async (c) => {
+    const itemId = c.req.param("itemId");
+    if (!ITEM_ID_PATTERN.test(itemId)) {
+      return c.json({ error: "invalid_item_id" }, 400);
+    }
+
     const requested = Number(c.req.query("maxWidth") ?? DEFAULT_WIDTH);
     const maxWidth = Number.isFinite(requested)
       ? Math.min(Math.max(1, Math.trunc(requested)), MAX_IMAGE_WIDTH)
@@ -18,7 +32,7 @@ export function registerImageRoutes<E extends Env>(app: Hono<E>, deps: ImageDeps
     let upstream: Response;
 
     try {
-      upstream = await deps.fetchImage(c.req.param("itemId"), {
+      upstream = await deps.fetchImage(itemId, {
         tag: c.req.query("tag"),
         maxWidth,
       });
@@ -27,8 +41,17 @@ export function registerImageRoutes<E extends Env>(app: Hono<E>, deps: ImageDeps
       return c.json({ error: "image_unavailable" }, 502);
     }
 
-    if (upstream.status === 404) return c.json({ error: "not_found" }, 404);
-    if (!upstream.ok) return c.json({ error: "image_unavailable" }, 502);
+    if (upstream.status === 404) {
+      // Undici can hold the underlying connection open until the body is
+      // consumed or cancelled; under sustained upstream failures this leaves
+      // it unreleased even though nothing will ever read it.
+      await upstream.body?.cancel();
+      return c.json({ error: "not_found" }, 404);
+    }
+    if (!upstream.ok) {
+      await upstream.body?.cancel();
+      return c.json({ error: "image_unavailable" }, 502);
+    }
 
     return new Response(upstream.body, {
       status: 200,

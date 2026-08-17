@@ -7,6 +7,7 @@ import {
   getUserStats,
   getWatchTimeSeries,
 } from "@jfstats/db";
+import type { AppEnv } from "@jfstats/shared";
 import { Hono } from "hono";
 import type Redis from "ioredis";
 import type { AppContext } from "../context.js";
@@ -15,7 +16,7 @@ import { requireAdmin } from "./middleware/auth.js";
 import { createRateLimiter } from "./rate-limit.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHistoryRoutes } from "./routes/history.js";
-import { registerImageRoutes } from "./routes/images.js";
+import { registerImageRoutes, type ImageDeps } from "./routes/images.js";
 import { registerLiveRoute, type LiveDeps } from "./routes/live.js";
 import { registerStatsRoutes } from "./routes/stats.js";
 import { createSessionStore, type SessionRecord } from "./sessions.js";
@@ -50,6 +51,45 @@ export function createLiveSubscriber(redis: Redis): LiveDeps["subscribe"] {
     return async () => {
       await subscriber.quit();
     };
+  };
+}
+
+/**
+ * Builds the outbound Jellyfin request for one item's poster art.
+ *
+ * itemId is validated as a 32-character hex GUID by registerImageRoutes
+ * before this ever runs, but it is still encodeURIComponent'd here rather
+ * than interpolated raw: Hono's router matches :itemId against the
+ * still-encoded path segment, and c.req.param() only decodeURIComponent's
+ * it *after* matching succeeds. A payload like "..%2F..%2FUsers%23" decodes
+ * to the literal "../../Users#" — dot-segments the URL constructor collapses
+ * and an unescaped "#" it treats as a fragment, silently dropping the
+ * "/Images/Primary" suffix that was supposed to pin the request. Since the
+ * admin Jellyfin API key rides along in this request's Authorization header,
+ * an unpinned path would hand that key to whatever endpoint survived. Belt
+ * and braces: the validator in images.ts is the primary defense; this
+ * encoding means a future loosening of that validator does not immediately
+ * reopen the traversal.
+ *
+ * Exported so the URL-building logic can be unit-tested directly, the same
+ * way createLiveSubscriber below is tested without going through the full
+ * authenticated request path.
+ */
+export function createImageFetcher(
+  env: Pick<AppEnv, "JELLYFIN_URL" | "JELLYFIN_API_KEY">,
+): ImageDeps["fetchImage"] {
+  return async (itemId, options) => {
+    const url = new URL(`${env.JELLYFIN_URL}/Items/${encodeURIComponent(itemId)}/Images/Primary`);
+    url.searchParams.set("maxWidth", String(options.maxWidth));
+    if (options.tag !== undefined) url.searchParams.set("tag", options.tag);
+
+    // The API key travels only in this server-to-server Authorization
+    // header — never in the URL (query strings end up in logs) and never
+    // forwarded to the browser.
+    return fetch(url, {
+      headers: { Authorization: `MediaBrowser Token="${env.JELLYFIN_API_KEY}"` },
+      signal: AbortSignal.timeout(15_000),
+    });
   };
 }
 
@@ -105,21 +145,7 @@ export function createApp(context: AppContext) {
 
   registerHistoryRoutes(app, { getHistory: (options) => getHistory(context.db, options) });
 
-  registerImageRoutes(app, {
-    fetchImage: async (itemId, options) => {
-      const url = new URL(`${context.env.JELLYFIN_URL}/Items/${itemId}/Images/Primary`);
-      url.searchParams.set("maxWidth", String(options.maxWidth));
-      if (options.tag !== undefined) url.searchParams.set("tag", options.tag);
-
-      // The API key travels only in this server-to-server Authorization
-      // header — never in the URL (query strings end up in logs) and never
-      // forwarded to the browser.
-      return fetch(url, {
-        headers: { Authorization: `MediaBrowser Token="${context.env.JELLYFIN_API_KEY}"` },
-        signal: AbortSignal.timeout(15_000),
-      });
-    },
-  });
+  registerImageRoutes(app, { fetchImage: createImageFetcher(context.env) });
 
   registerLiveRoute(app, {
     loadCurrent: () => context.snapshots.loadLive(),

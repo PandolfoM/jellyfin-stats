@@ -1,6 +1,6 @@
 import type Redis from "ioredis";
-import { describe, expect, it, vi } from "vitest";
-import { createApp, createLiveSubscriber } from "./app.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createApp, createImageFetcher, createLiveSubscriber } from "./app.js";
 import type { AppContext } from "../context.js";
 
 function testContext(): AppContext {
@@ -137,5 +137,65 @@ describe("createLiveSubscriber", () => {
 
     await unsubscribe();
     expect(quit).toHaveBeenCalled();
+  });
+});
+
+describe("createImageFetcher", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("requests exactly the intended path for a valid item id", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok"));
+    const fetchImage = createImageFetcher({
+      JELLYFIN_URL: "http://jellyfin.internal:8096",
+      JELLYFIN_API_KEY: "secret-key",
+    });
+
+    await fetchImage("a1b2c3d4e5f67890a1b2c3d4e5f67890", { maxWidth: 400 });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const requestedUrl = String(fetchSpy.mock.calls[0]?.[0]);
+    // Pins the whole thing: if the id were interpolated unencoded and this
+    // assertion only checked a substring or a prefix, a payload that
+    // truncated everything after "/Items/<id>" (via an unescaped "#") could
+    // still pass. Only an exact match proves nothing was dropped or reinterpreted.
+    expect(requestedUrl).toBe(
+      "http://jellyfin.internal:8096/Items/a1b2c3d4e5f67890a1b2c3d4e5f67890/Images/Primary?maxWidth=400",
+    );
+  });
+
+  it("never puts the API key in the request URL", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok"));
+    const fetchImage = createImageFetcher({
+      JELLYFIN_URL: "http://jellyfin.internal:8096",
+      JELLYFIN_API_KEY: "super-secret-admin-key",
+    });
+
+    await fetchImage("a1b2c3d4e5f67890a1b2c3d4e5f67890", { maxWidth: 400 });
+
+    const requestedUrl = String(fetchSpy.mock.calls[0]?.[0]);
+    expect(requestedUrl).not.toContain("super-secret-admin-key");
+  });
+
+  it("keeps a traversal/fragment payload contained within the item id path segment", async () => {
+    // registerImageRoutes rejects this shape before it ever reaches
+    // createImageFetcher (see images.ts), but this proves the encoding here
+    // is real defense-in-depth, not just a comment: even if a future change
+    // loosened or removed that validator, this payload could not escape the
+    // /Items/<id>/Images/Primary path to hit a different Jellyfin endpoint,
+    // because encodeURIComponent turns "/" and "#" into inert path characters.
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok"));
+    const fetchImage = createImageFetcher({
+      JELLYFIN_URL: "http://jellyfin.internal:8096",
+      JELLYFIN_API_KEY: "secret-key",
+    });
+
+    await fetchImage("../../Users#", { maxWidth: 400 });
+
+    const requestedUrl = String(fetchSpy.mock.calls[0]?.[0]);
+    expect(requestedUrl).toBe(
+      "http://jellyfin.internal:8096/Items/..%2F..%2FUsers%23/Images/Primary?maxWidth=400",
+    );
   });
 });
