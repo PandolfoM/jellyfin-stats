@@ -16,6 +16,13 @@ const schema = z.object({
   FALLBACK_ADMIN_PASSWORD: z.string().min(1).optional(),
   PORT: z.coerce.number().int().positive().default(3000),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+  // Secure cookies are dropped over plain HTTP, which is how most self-hosted
+  // first runs happen. Default off; the README says to turn it on behind TLS.
+  COOKIE_SECURE: z
+    .enum(["true", "false"])
+    .catch("false")
+    .transform((value) => value === "true"),
+  SESSION_TTL_HOURS: z.coerce.number().int().positive().default(168),
 });
 
 export type AppEnv = z.infer<typeof schema> & {
