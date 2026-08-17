@@ -1,4 +1,4 @@
-﻿import type { LiveSession, SessionSnapshot } from "@jfstats/shared";
+import type { LiveSession, SessionSnapshot } from "@jfstats/shared";
 import { describe, expect, it } from "vitest";
 import { diffSessions, snapshotKey } from "./diff.js";
 

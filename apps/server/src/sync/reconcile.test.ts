@@ -1,4 +1,4 @@
-﻿import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { reconcileOpenSessions, type ReconcileDeps } from "./reconcile.js";
 
 const NOW = new Date("2026-08-16T20:00:00Z").getTime();

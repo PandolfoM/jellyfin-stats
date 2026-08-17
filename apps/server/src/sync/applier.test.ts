@@ -1,4 +1,4 @@
-﻿import type { LiveSession } from "@jfstats/shared";
+import type { LiveSession } from "@jfstats/shared";
 import { describe, expect, it, vi } from "vitest";
 import { applyEvents, type ApplierDeps } from "./applier.js";
 import { snapshotKey } from "./diff.js";
@@ -54,6 +54,19 @@ describe("applyEvents", () => {
       playMethod: "DirectPlay",
     }));
     expect(d.upsertDevice).toHaveBeenCalledWith(d.db, expect.objectContaining({ id: "device-1" }));
+  });
+
+  it("passes the session's true isPaused state through on started", async () => {
+    // A stream can already be paused the very first time the pipeline observes it
+    // (worker restart, or a pause within the first poll interval). openSession must
+    // get the real value from the LiveSession, not silently default to false.
+    const d = deps();
+    const session = live({ isPaused: true });
+    const key = snapshotKey("ps-1", "item-1");
+
+    await applyEvents(d, [{ type: "started", key, session, at: AT.getTime() }], new Map([[key, session]]));
+
+    expect(d.openSession).toHaveBeenCalledWith(d.db, expect.objectContaining({ isPaused: true }));
   });
 
   it("writes no rollup on started, because nothing has been watched yet", async () => {

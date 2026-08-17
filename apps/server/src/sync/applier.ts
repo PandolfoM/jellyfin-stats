@@ -61,6 +61,7 @@ export async function applyEvents(
           client: event.session.client,
           playMethod: event.session.playMethod,
           positionTicks: event.session.positionTicks,
+          isPaused: event.session.isPaused,
           remoteEndpoint: event.session.remoteEndpoint,
           at,
         });

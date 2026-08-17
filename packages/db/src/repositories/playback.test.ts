@@ -1,4 +1,4 @@
-﻿import { and, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { items, playbackRollupDaily, playbackSessions } from "../schema.js";
 import { stopTestDatabase, withTestDatabase } from "../testing/harness.js";
@@ -23,6 +23,7 @@ const OPEN = {
   client: "Jellyfin Web",
   playMethod: "DirectPlay" as const,
   positionTicks: 0,
+  isPaused: false,
   remoteEndpoint: "10.0.0.5",
   at: START,
 };
@@ -35,6 +36,19 @@ describe("playback repositories", () => {
       const rows = await db.select().from(playbackSessions);
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({ sessionId: "ps-1", endedAt: null, watchMs: 0 });
+    });
+  });
+
+  it("opens a session already paused as is_paused: true", async () => {
+    // A session first observed already paused (worker restart, or the user pauses
+    // within the first poll interval) must not read is_paused: false until the next
+    // poll's progressed/paused event corrects it — openSession is the only place that
+    // knows the true initial state.
+    await withTestDatabase(async (db) => {
+      await openSession(db, { ...OPEN, isPaused: true });
+
+      const rows = await db.select().from(playbackSessions);
+      expect(rows[0]).toMatchObject({ isPaused: true });
     });
   });
 

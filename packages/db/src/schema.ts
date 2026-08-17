@@ -77,6 +77,10 @@ export const playbackSessions = pgTable(
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull(),
     positionTicks: bigint("position_ticks", { mode: "number" }).notNull().default(0),
     watchMs: bigint("watch_ms", { mode: "number" }).notNull().default(0),
+    // Every write path in the applier (openSession, touchSession, closeSession) sets
+    // this explicitly now — the default is a backstop for inserts outside that path
+    // (e.g. tests seeding rows directly for unrelated recompute scenarios), not a
+    // value anything in the live pipeline relies on.
     isPaused: boolean("is_paused").notNull().default(false),
     completed: boolean("completed").notNull().default(false),
     remoteEndpoint: text("remote_endpoint"),

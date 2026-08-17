@@ -10,6 +10,7 @@ export interface OpenSessionInput {
   client: string | null;
   playMethod: string | null;
   positionTicks: number;
+  isPaused: boolean;
   remoteEndpoint: string | null;
   at: Date;
 }
@@ -88,6 +89,7 @@ export async function openSession(db: Db, input: OpenSessionInput): Promise<void
       client: input.client,
       playMethod: input.playMethod,
       positionTicks: input.positionTicks,
+      isPaused: input.isPaused,
       remoteEndpoint: input.remoteEndpoint,
       startedAt: input.at,
       lastSeenAt: input.at,
