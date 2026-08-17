@@ -1,7 +1,19 @@
+import {
+  getHistory,
+  getLibraryStats,
+  getOverview,
+  getTopItems,
+  getUserDetail,
+  getUserStats,
+  getWatchTimeSeries,
+} from "@jfstats/db";
 import { Hono } from "hono";
 import type { AppContext } from "../context.js";
+import { requireAdmin } from "./middleware/auth.js";
 import { createRateLimiter } from "./rate-limit.js";
 import { registerAuthRoutes } from "./routes/auth.js";
+import { registerHistoryRoutes } from "./routes/history.js";
+import { registerStatsRoutes } from "./routes/stats.js";
 import { createSessionStore, type SessionRecord } from "./sessions.js";
 
 /** Populated by requireAdmin (see middleware/auth.ts) once a request's
@@ -36,6 +48,25 @@ export function createApp(context: AppContext) {
           }
         : null,
   });
+
+  const cookieConfig = {
+    cookieSecure: context.env.COOKIE_SECURE,
+    sessionTtlHours: context.env.SESSION_TTL_HOURS,
+  };
+
+  app.use("/api/stats/*", requireAdmin(sessions, cookieConfig));
+  app.use("/api/history", requireAdmin(sessions, cookieConfig));
+
+  registerStatsRoutes(app, {
+    getOverview: (range) => getOverview(context.db, range),
+    getWatchTimeSeries: (range) => getWatchTimeSeries(context.db, range),
+    getTopItems: (range, options) => getTopItems(context.db, range, options),
+    getUserStats: (range) => getUserStats(context.db, range),
+    getUserDetail: (userId, range) => getUserDetail(context.db, userId, range),
+    getLibraryStats: (range) => getLibraryStats(context.db, range),
+  });
+
+  registerHistoryRoutes(app, { getHistory: (options) => getHistory(context.db, options) });
 
   app.notFound((c) => c.json({ error: "not_found" }, 404));
 

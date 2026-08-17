@@ -12,6 +12,9 @@ function testContext(): AppContext {
       fallbackAdminEnabled: false,
     },
     redis: {},
+    // Never opened: an unauthenticated request is rejected by requireAdmin
+    // before any handler touches context.db.
+    db: {},
   } as unknown as AppContext;
 }
 
@@ -45,5 +48,24 @@ describe("createApp", () => {
 
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: "internal_error" });
+  });
+
+  it("rejects an unauthenticated request to the stats API", async () => {
+    // Proves requireAdmin is actually mounted on this route, not merely
+    // written elsewhere: without this, every user's stats would be reachable
+    // by anyone who can reach the port.
+    const app = createApp(testContext());
+
+    const response = await app.request("/api/stats/overview");
+
+    expect(response.status).toBe(401);
+  });
+
+  it("rejects an unauthenticated request to the history API", async () => {
+    const app = createApp(testContext());
+
+    const response = await app.request("/api/history");
+
+    expect(response.status).toBe(401);
   });
 });
