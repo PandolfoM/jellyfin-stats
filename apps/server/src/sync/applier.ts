@@ -21,7 +21,11 @@ export interface ApplierDeps {
   upsertDevice: typeof UpsertDevice;
 }
 
-/** Splits `${playSessionId}:${itemId}` back into its parts. */
+/**
+ * Splits `${playSessionId}:${itemId}` back into its parts. Splitting on the *last*
+ * colon only inverts `snapshotKey` correctly because Jellyfin item ids never contain
+ * a colon; a playSessionId containing one is still handled correctly this way.
+ */
 function parseKey(key: string): { playSessionId: string; itemId: string } {
   const separator = key.lastIndexOf(":");
   return { playSessionId: key.slice(0, separator), itemId: key.slice(separator + 1) };
@@ -129,6 +133,14 @@ export async function applyEvents(
           });
         }
         break;
+      }
+
+      default: {
+        // Exhaustiveness guard: if a new SessionEvent variant is ever added without a
+        // case here, this assignment fails to compile instead of the event silently
+        // falling through with no database write.
+        const _exhaustive: never = event;
+        return _exhaustive;
       }
     }
   }
