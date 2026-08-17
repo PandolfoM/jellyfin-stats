@@ -105,8 +105,8 @@ export async function getTopItems(
       libraryId: items.libraryId,
       seriesId: items.seriesId,
       imageTag: items.imageTag,
-      plays: sql<number>`sum(${playbackRollupDaily.playCount})::int`,
-      watchMs: sql<number>`sum(${playbackRollupDaily.watchMs})::bigint`,
+      plays: sql<string>`sum(${playbackRollupDaily.playCount})::text`,
+      watchMs: sql<string>`sum(${playbackRollupDaily.watchMs})::text`,
     })
     .from(playbackRollupDaily)
     .innerJoin(items, eq(items.id, playbackRollupDaily.itemId))

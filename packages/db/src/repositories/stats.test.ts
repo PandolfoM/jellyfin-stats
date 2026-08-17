@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { items, jellyfinUsers, libraries, playbackRollupDaily } from "../schema.js";
 import { stopTestDatabase, withTestDatabase } from "../testing/harness.js";
@@ -156,6 +157,49 @@ describe("getTopItems", () => {
 
       expect(top.find((row) => row.itemId === "item-1")?.imageTag).toBe("tag-1");
       expect(top.find((row) => row.itemId === "item-2")?.imageTag).toBeNull();
+    });
+  });
+});
+
+// A watch_ms this large has no real-world counterpart (roughly 285,000 years of
+// playback) — it is chosen purely to sit past Number.MAX_SAFE_INTEGER
+// (9_007_199_254_740_991) and pin the precision contract: the SQL layer must hand back
+// the exact decimal string so the only rounding that happens is the single, visible
+// `Number(...)` conversion in TypeScript, not an earlier, invisible one inside the
+// driver. Do not "simplify" this to a realistic value; that would defeat the point.
+//
+// The literal is passed as a SQL string parameter (not a JS number literal) so the
+// value itself is never rounded before it reaches Postgres.
+const HUGE_WATCH_MS = "9007199254740993";
+
+async function seedHugeWatchTime(db: Db): Promise<void> {
+  await db.insert(libraries).values([{ id: "lib-movies", name: "Movies", collectionType: "movies" }]);
+  await db.insert(jellyfinUsers).values([{ id: "user-a", name: "alpha", isAdmin: true }]);
+  await db.insert(items).values([{ id: "item-huge", name: "Huge Watch", type: "Movie", libraryId: "lib-movies" }]);
+  await db.execute(sql`
+    INSERT INTO ${playbackRollupDaily} (day, user_id, item_id, library_id, play_count, watch_ms)
+    VALUES ('2026-08-10', 'user-a', 'item-huge', 'lib-movies', 1, ${HUGE_WATCH_MS}::bigint)
+  `);
+}
+
+describe("watch time precision beyond Number.MAX_SAFE_INTEGER", () => {
+  it("getTopItems converts the full decimal value rather than an already-mangled one", async () => {
+    await withTestDatabase(async (db) => {
+      await seedHugeWatchTime(db);
+
+      const top = await getTopItems(db, { from: "2026-08-10", to: "2026-08-10" }, { limit: 10 });
+
+      expect(top[0]?.watchMs).toBe(Number(HUGE_WATCH_MS));
+    });
+  });
+
+  it("getOverview converts the full decimal value rather than an already-mangled one", async () => {
+    await withTestDatabase(async (db) => {
+      await seedHugeWatchTime(db);
+
+      const overview = await getOverview(db, { from: "2026-08-10", to: "2026-08-10" });
+
+      expect(overview.watchMs).toBe(Number(HUGE_WATCH_MS));
     });
   });
 });
