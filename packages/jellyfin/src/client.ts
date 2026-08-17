@@ -1,5 +1,6 @@
 import type { LiveSession } from "@jfstats/shared";
 import type { z } from "zod";
+import { authResponseSchema, clientIdentificationHeader, JellyfinAuthError, type JellyfinAuthResult } from "./auth.js";
 import {
   itemsSchema,
   librariesSchema,
@@ -45,6 +46,8 @@ export interface JellyfinClient {
   getUsers(): Promise<JellyfinUser[]>;
   getLibraries(): Promise<JellyfinLibrary[]>;
   getItems(): Promise<JellyfinItem[]>;
+  authenticateByName(username: string, password: string): Promise<JellyfinAuthResult>;
+  revokeToken(accessToken: string): Promise<void>;
 }
 
 export function createJellyfinClient(options: JellyfinClientOptions): JellyfinClient {
@@ -153,5 +156,64 @@ export function createJellyfinClient(options: JellyfinClientOptions): JellyfinCl
     return perLibrary.flat();
   }
 
-  return { getSessions, getUsers, getLibraries, getItems };
+  async function authenticateByName(username: string, password: string) {
+    let response: Response;
+
+    try {
+      response = await doFetch(`${options.baseUrl}/Users/AuthenticateByName`, {
+        method: "POST",
+        headers: {
+          Authorization: clientIdentificationHeader(),
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        // Credentials travel in the body. Never the query string — it would land
+        // in access logs and browser history.
+        body: JSON.stringify({ Username: username, Pw: password }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (cause) {
+      throw new JellyfinAuthError("unreachable", "Could not reach Jellyfin");
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      throw new JellyfinAuthError("invalid_credentials", "Jellyfin rejected the credentials");
+    }
+
+    if (!response.ok) {
+      throw new JellyfinAuthError("unreachable", `Jellyfin returned ${response.status}`);
+    }
+
+    const parsed = authResponseSchema.safeParse(await response.json());
+
+    if (!parsed.success) {
+      throw new JellyfinAuthError("unreachable", "Unexpected authentication response");
+    }
+
+    return {
+      userId: parsed.data.User.Id,
+      userName: parsed.data.User.Name,
+      isAdmin: parsed.data.User.Policy?.IsAdministrator ?? false,
+      accessToken: parsed.data.AccessToken,
+    };
+  }
+
+  async function revokeToken(accessToken: string) {
+    // Best effort. A failure here must never surface to a user who just logged in
+    // successfully — the worst case is one stale device entry on the Jellyfin server.
+    try {
+      await doFetch(`${options.baseUrl}/Sessions/Logout`, {
+        method: "POST",
+        headers: {
+          Authorization: `MediaBrowser Token="${accessToken}"`,
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch {
+      // swallowed deliberately
+    }
+  }
+
+  return { getSessions, getUsers, getLibraries, getItems, authenticateByName, revokeToken };
 }
