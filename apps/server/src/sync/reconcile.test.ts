@@ -31,6 +31,7 @@ describe("reconcileOpenSessions", () => {
       // playback continued past the last observation.
       at: lastSeenAt,
       watchedMs: 0,
+      runtimeTicks: null,
     }));
   });
 
