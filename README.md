@@ -34,11 +34,20 @@ pnpm --filter @jfstats/server dev:worker
 ```
 
 Compose publishes Postgres and Redis on their conventional host ports
-(`5432`/`6379`). If something on your machine already uses one of those ports,
-override `POSTGRES_PORT` and/or `REDIS_PORT` in `.env` before running
-`docker compose up -d` — the container's internal port is unaffected, so
-`DATABASE_URL`/`REDIS_URL` only need updating if you also changed the host
-you connect from.
+(`5432`/`6379`). `POSTGRES_PORT`/`REDIS_PORT` control only what Docker
+publishes on the host — set one when something on your machine already
+occupies the conventional port. Everything that connects to Postgres or
+Redis (`dev:worker`, `migrate:push`, `seed`) runs on the host, outside
+Docker, and never reads `POSTGRES_PORT`/`REDIS_PORT` — it connects only
+through `DATABASE_URL`/`REDIS_URL`. So the port inside those URLs must be
+changed to match, in the same edit, or the app keeps trying the old port
+and fails to connect. For example, if `6379` is already taken:
+
+```bash
+# .env
+REDIS_PORT=16379
+REDIS_URL=redis://localhost:16379
+```
 
 To populate the database with 90 days of fake history instead of a live server:
 
@@ -63,6 +72,7 @@ it never touches data synced from a real Jellyfin server.
 | `REFERENCE_SYNC_INTERVAL_MS` | `900000` | How often users and libraries refresh |
 | `COMPLETION_THRESHOLD` | `0.9` | Fraction of runtime that counts as watched |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
+| `PORT` | `3000` | Reserved for the HTTP API (Plan 2); unused so far |
 | `POSTGRES_PORT` | `5432` | Host port docker-compose publishes Postgres on |
 | `REDIS_PORT` | `6379` | Host port docker-compose publishes Redis on |
 
