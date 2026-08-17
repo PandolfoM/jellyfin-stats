@@ -2,6 +2,10 @@ import { sql } from "drizzle-orm";
 import type { Db } from "../client.js";
 
 export const MAX_HISTORY_LIMIT = 200;
+// Used when `limit`/`offset` arrive non-finite (e.g. NaN from a non-numeric query
+// string param) — a bounded, reasonable page rather than a value that flows straight
+// into `LIMIT`/`OFFSET` and fails at the driver.
+const DEFAULT_HISTORY_LIMIT = 50;
 
 export interface HistoryOptions {
   limit: number;
@@ -31,14 +35,28 @@ export interface HistoryRow {
   completed: boolean;
 }
 
+// Clamped here rather than trusted from the caller: an unbounded limit from a query
+// string is a trivial denial of service. `Number.isFinite` is checked explicitly
+// because `Math.max`/`Math.min` propagate NaN rather than clamping it — a NaN limit
+// (e.g. from a non-numeric query string) would otherwise flow straight into
+// `LIMIT ${limit}` and fail at the driver instead of being bounded. `Math.trunc`
+// avoids relying on Postgres's implicit coercion for a fractional value.
+function clampLimit(limit: number): number {
+  if (!Number.isFinite(limit)) return DEFAULT_HISTORY_LIMIT;
+  return Math.min(Math.max(1, Math.trunc(limit)), MAX_HISTORY_LIMIT);
+}
+
+function clampOffset(offset: number): number {
+  if (!Number.isFinite(offset)) return 0;
+  return Math.max(0, Math.trunc(offset));
+}
+
 export async function getHistory(
   db: Db,
   options: HistoryOptions,
 ): Promise<{ rows: HistoryRow[]; total: number }> {
-  // Clamped here rather than trusted from the caller: an unbounded limit from a
-  // query string is a trivial denial of service.
-  const limit = Math.min(Math.max(1, options.limit), MAX_HISTORY_LIMIT);
-  const offset = Math.max(0, options.offset);
+  const limit = clampLimit(options.limit);
+  const offset = clampOffset(options.offset);
 
   const filters = [sql`true`];
 
@@ -84,7 +102,7 @@ export async function getHistory(
     LEFT JOIN items i         ON i.id = s.item_id
     LEFT JOIN devices d       ON d.id = s.device_id
     WHERE ${where}
-    ORDER BY s.started_at DESC
+    ORDER BY s.started_at DESC, s.id DESC
     LIMIT ${limit} OFFSET ${offset}
   `);
 
