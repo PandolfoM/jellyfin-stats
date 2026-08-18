@@ -18,8 +18,10 @@ import { createRateLimiter } from "./rate-limit.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHistoryRoutes } from "./routes/history.js";
 import { registerImageRoutes, type ImageDeps } from "./routes/images.js";
-import { registerLiveRoute, type LiveDeps, type LiveStreamRegistry } from "./routes/live.js";
+import { registerLiveRoute, type LiveDeps } from "./routes/live.js";
+import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerStatsRoutes } from "./routes/stats.js";
+import { registerStaticRoutes } from "./static.js";
 import { createSessionStore, type SessionRecord } from "./sessions.js";
 
 /** Populated by requireAdmin (see middleware/auth.ts) once a request's
@@ -113,13 +115,14 @@ export function createImageFetcher(
   };
 }
 
-export interface App {
-  app: Hono<{ Variables: AppVariables }>;
-  /** Open SSE streams, so shutdown can end them instead of waiting on them. */
-  liveStreams: LiveStreamRegistry;
-}
-
-export function createApp(context: AppContext): App {
+// No explicit return-type interface on createApp below — an annotation there
+// would erase the richer, chained route schema that registerAuthRoutes (and
+// every registerXRoutes call threaded after it) hands back (an annotated
+// return type widens to the annotation, not the actual inferred value).
+// AppType is derived from the real return value instead, so `hc<AppType>` on
+// the web side sees every /api/* route registered below rather than
+// resolving to `unknown`.
+export function createApp(context: AppContext) {
   const app = new Hono<{ Variables: AppVariables }>();
 
   app.get("/api/health", (c) => c.json({ status: "ok" }));
@@ -150,8 +153,15 @@ export function createApp(context: AppContext): App {
   // Ungated, this would let anyone who can reach the port enumerate a
   // private media library by walking item ids.
   app.use("/api/images/*", requireAdmin(sessions, cookieConfig));
+  // The effective sync intervals, completion threshold, and Jellyfin server
+  // URL are configuration, not secrets — but they are still only meant for
+  // whoever configured this deployment, not anyone who can reach the port.
+  app.use("/api/settings", requireAdmin(sessions, cookieConfig));
 
-  registerAuthRoutes(app, {
+  // Captured, and threaded into every registerXRoutes call below, because the
+  // chained return value is what the web client's AppType is built from — see
+  // registerAuthRoutes for why a bare statement here would lose the schema.
+  const routedApp = registerAuthRoutes(app, {
     authenticateByName: (u, p) => context.jellyfin.authenticateByName(u, p),
     revokeToken: (t) => context.jellyfin.revokeToken(t),
     sessions,
@@ -170,7 +180,13 @@ export function createApp(context: AppContext): App {
         : null,
   });
 
-  registerStatsRoutes(app, {
+  // Each of these, like registerAuthRoutes above, is threaded through the
+  // previous call's returned app rather than the original `app` variable —
+  // that chaining is what lets AppType (below) see auth, stats, history,
+  // images, and live routes all together instead of only whichever call ran
+  // last. app.notFound/app.onError below don't add typed routes, so they stay
+  // on the original `app` (the same underlying instance either way).
+  const statsApp = registerStatsRoutes(routedApp, {
     getOverview: (range) => getOverview(context.db, range),
     getWatchTimeSeries: (range) => getWatchTimeSeries(context.db, range),
     getTopItems: (range, options) => getTopItems(context.db, range, options),
@@ -179,14 +195,35 @@ export function createApp(context: AppContext): App {
     getLibraryStats: (range) => getLibraryStats(context.db, range),
   });
 
-  registerHistoryRoutes(app, { getHistory: (options) => getHistory(context.db, options) });
+  const historyApp = registerHistoryRoutes(statsApp, {
+    getHistory: (options) => getHistory(context.db, options),
+  });
 
-  registerImageRoutes(app, { fetchImage: createImageFetcher(context.env) });
+  // Built from context.env by picking exactly these four fields, by name —
+  // this call site is the allow-list boundary settings.ts's own comment
+  // refers to. Passing context.env itself (or any wider object) here would
+  // defeat the whole point: registerSettingsRoutes only ever reads the
+  // fields SettingsDeps declares, but nothing stops a future edit from
+  // handing it something bigger unless this stays an explicit pick.
+  const settingsApp = registerSettingsRoutes(historyApp, {
+    sessionPollIntervalMs: context.env.SESSION_POLL_INTERVAL_MS,
+    referenceSyncIntervalMs: context.env.REFERENCE_SYNC_INTERVAL_MS,
+    completionThreshold: context.env.COMPLETION_THRESHOLD,
+    jellyfinUrl: context.env.JELLYFIN_URL,
+  });
 
-  const liveStreams = registerLiveRoute(app, {
+  const imagesApp = registerImageRoutes(settingsApp, { fetchImage: createImageFetcher(context.env) });
+
+  // registerLiveRoute returns one object carrying both the chained app (used
+  // just below) and the LiveStreamRegistry members themselves — see that
+  // file for why this one is flattened rather than following the same
+  // pattern as statsApp/historyApp/imagesApp above.
+  const liveStreams = registerLiveRoute(imagesApp, {
     loadCurrent: () => context.snapshots.loadLive(),
     subscribe: createLiveSubscriber(context.redis, context.logger),
   });
+
+  registerStaticRoutes(app, context.env.WEB_ROOT);
 
   app.notFound((c) => c.json({ error: "not_found" }, 404));
 
@@ -197,7 +234,7 @@ export function createApp(context: AppContext): App {
     return c.json({ error: "internal_error" }, 500);
   });
 
-  return { app, liveStreams };
+  return { app: liveStreams.app, liveStreams };
 }
 
-export type AppType = App["app"];
+export type AppType = ReturnType<typeof createApp>["app"];

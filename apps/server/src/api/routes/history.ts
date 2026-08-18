@@ -1,13 +1,20 @@
 import { MAX_HISTORY_LIMIT, type HistoryOptions, type HistoryRow } from "@jfstats/db";
-import type { Env, Hono } from "hono";
+import type { Env, Hono, Schema } from "hono";
 import { InvalidRangeError, parseRange } from "./stats.js";
 
 export interface HistoryDeps {
   getHistory(options: HistoryOptions): Promise<{ rows: HistoryRow[]; total: number }>;
 }
 
-export function registerHistoryRoutes<E extends Env>(app: Hono<E>, deps: HistoryDeps): void {
-  app.get("/api/history", async (c) => {
+/**
+ * Returns the app with this route chained onto it (rather than `void`), the
+ * same reason registerAuthRoutes does — see that file for why. The incoming
+ * `S` is generic (not defaulted to Hono's blank schema) so that a caller
+ * threading in an already-chained app keeps those routes in the returned
+ * type instead of them being erased at this call.
+ */
+export function registerHistoryRoutes<E extends Env, S extends Schema>(app: Hono<E, S>, deps: HistoryDeps) {
+  return app.get("/api/history", async (c) => {
     const hasRange = c.req.query("from") !== undefined || c.req.query("to") !== undefined;
 
     let from: string | undefined;

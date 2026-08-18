@@ -11,6 +11,13 @@ function testContext(): AppContext {
       SESSION_TTL_HOURS: 168,
       TRUST_PROXY_HEADERS: false,
       fallbackAdminEnabled: false,
+      // Synthetic, non-secret values for the /api/settings gate test below —
+      // never exercised beyond construction, since an unauthenticated
+      // request never reaches the handler that would read them.
+      SESSION_POLL_INTERVAL_MS: 5_000,
+      REFERENCE_SYNC_INTERVAL_MS: 900_000,
+      COMPLETION_THRESHOLD: 0.9,
+      JELLYFIN_URL: "http://jellyfin.example.invalid",
     },
     redis: {},
     // Never opened: an unauthenticated request is rejected by requireAdmin
@@ -91,6 +98,18 @@ describe("createApp", () => {
     const { app } = createApp(testContext());
 
     const response = await app.request("/api/images/items/anything");
+
+    expect(response.status).toBe(401);
+  });
+
+  it("rejects an unauthenticated request to /api/settings", async () => {
+    // Proves requireAdmin is actually mounted ahead of this route, not just
+    // written somewhere in the file — the effective sync intervals and
+    // Jellyfin URL this route exposes are still configuration an anonymous
+    // caller must not be able to read.
+    const { app } = createApp(testContext());
+
+    const response = await app.request("/api/settings");
 
     expect(response.status).toBe(401);
   });

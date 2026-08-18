@@ -38,6 +38,8 @@ const schema = z.object({
     .enum(["true", "false"])
     .catch("false")
     .transform((value) => value === "true"),
+  // Absolute path to the built SPA. Unset in development, where Vite serves it.
+  WEB_ROOT: z.string().min(1).optional(),
 });
 
 export type AppEnv = z.infer<typeof schema> & {

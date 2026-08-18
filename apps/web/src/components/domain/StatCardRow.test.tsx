@@ -1,0 +1,78 @@
+// @vitest-environment jsdom
+import { render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { OverviewResponse } from "../../api/queries";
+import { StatCardRow } from "./StatCardRow";
+
+afterEach(() => vi.restoreAllMocks());
+
+const STATS: OverviewResponse = { plays: 42, watchMs: 7_265_000, activeUsers: 3, activeItems: 12 };
+
+describe("StatCardRow", () => {
+  it("renders zeros, not blanks, for a null stats object once loaded", () => {
+    render(<StatCardRow stats={null} loading={false} />);
+
+    // formatCount(0) === "0" and formatDuration(0) === "0m" — a component
+    // that rendered `undefined`/`NaN`/an empty string here (e.g. from
+    // `stats.plays` on a null `stats`) would fail this, whereas one that
+    // silently omitted the tiles entirely would fail the `getAllByText`
+    // count below.
+    const zeroCounts = screen.getAllByText("0");
+    expect(zeroCounts).toHaveLength(3); // plays, active users, active items
+    expect(screen.getByText("0m")).toBeInTheDocument();
+  });
+
+  it("renders the real numbers once stats resolve", () => {
+    render(<StatCardRow stats={STATS} loading={false} />);
+
+    expect(screen.getByText("42")).toBeInTheDocument();
+    expect(screen.getByText("3")).toBeInTheDocument();
+    expect(screen.getByText("12")).toBeInTheDocument();
+    expect(screen.getByText("2h 1m")).toBeInTheDocument();
+  });
+
+  it("renders four skeletons while loading, regardless of stats", () => {
+    render(<StatCardRow stats={STATS} loading />);
+
+    expect(document.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(4);
+    expect(screen.queryByText("42")).not.toBeInTheDocument();
+  });
+
+  it("labels all four tiles", () => {
+    render(<StatCardRow stats={STATS} loading={false} />);
+
+    expect(screen.getByText("Plays")).toBeInTheDocument();
+    expect(screen.getByText("Watch time")).toBeInTheDocument();
+    expect(screen.getByText("Active users")).toBeInTheDocument();
+    expect(screen.getByText("Active items")).toBeInTheDocument();
+  });
+
+  // Task 10's user- and library-detail routes pass only `plays`/`watchMs` —
+  // neither `getUserDetail` nor `getLibraryStats` has anything resembling
+  // "active users" or "active items" for a single user/library. A component
+  // that still rendered those two tiles with some fabricated or leftover
+  // number would silently show a wrong metric on both detail pages.
+  it("renders only the tiles for fields that are present, omitting the rest entirely", () => {
+    render(<StatCardRow stats={{ plays: 7, watchMs: 90_000 }} loading={false} />);
+
+    expect(screen.getByText("Plays")).toBeInTheDocument();
+    expect(screen.getByText("7")).toBeInTheDocument();
+    expect(screen.getByText("Watch time")).toBeInTheDocument();
+    expect(screen.getByText("1m")).toBeInTheDocument();
+    expect(screen.queryByText("Active users")).not.toBeInTheDocument();
+    expect(screen.queryByText("Active items")).not.toBeInTheDocument();
+    expect(document.querySelectorAll('[data-slot="card"]')).toHaveLength(2);
+  });
+
+  it("renders zeros (not omitted) for plays/watchMs specifically, even though other fields are omitted", () => {
+    render(<StatCardRow stats={{ plays: 0, watchMs: 0 }} loading={false} />);
+
+    // Two "Plays"/"Watch time" tiles showing real zeros — distinct from the
+    // "stats is null" case above, which falls back to a full four-tile
+    // ZERO_STATS. A partial object with zero values must still render
+    // exactly its two tiles, not fall back to all four.
+    expect(document.querySelectorAll('[data-slot="card"]')).toHaveLength(2);
+    expect(screen.getByText("0m")).toBeInTheDocument();
+  });
+});

@@ -1,5 +1,5 @@
 import type { LiveSession } from "@jfstats/shared";
-import type { Env, Hono } from "hono";
+import type { Env, Hono, Schema } from "hono";
 import { streamSSE } from "hono/streaming";
 
 export interface LiveDeps {
@@ -33,10 +33,27 @@ export interface LiveStreamRegistry {
 // Comfortably inside the 30-60s window a typical idle-timeout proxy enforces.
 const HEARTBEAT_MS = 25_000;
 
-export function registerLiveRoute<E extends Env>(app: Hono<E>, deps: LiveDeps): LiveStreamRegistry {
+/**
+ * Returns one object carrying both the app with this route chained onto it
+ * (rather than `void`, for the same reason registerAuthRoutes does — see
+ * that file for why) and the LiveStreamRegistry members (`size`, `closeAll`)
+ * spread across the same object rather than nested under a `registry` key.
+ * That flattening is deliberate: `apps/server/src/api.test.ts` (which must
+ * keep passing unchanged) already calls `registerLiveRoute` directly and
+ * uses its return value as a `LiveStreamRegistry` — `streams.size`, and
+ * passing `streams` straight to `closeApiServer`. A `{ app, registry }` split
+ * would have broken that call site's shape. The flattened object still
+ * satisfies `LiveStreamRegistry` structurally (the extra `app` property is
+ * simply ignored wherever a `LiveStreamRegistry` is expected), so existing
+ * callers are untouched while `createApp` can additionally read `.app`. The
+ * incoming `S` is generic (not defaulted to Hono's blank schema) so that a
+ * caller threading in an already-chained app keeps those routes in the
+ * returned type instead of them being erased at this call.
+ */
+export function registerLiveRoute<E extends Env, S extends Schema>(app: Hono<E, S>, deps: LiveDeps) {
   const openStreams = new Set<() => Promise<void>>();
 
-  app.get("/api/live", (c) => {
+  const routedApp = app.get("/api/live", (c) => {
     return streamSSE(c, async (stream) => {
       // Track abort before calling subscribe() at all — registered synchronously,
       // before cb's first await, so it is in place before the caller can possibly
@@ -106,6 +123,7 @@ export function registerLiveRoute<E extends Env>(app: Hono<E>, deps: LiveDeps): 
   });
 
   return {
+    app: routedApp,
     get size() {
       return openStreams.size;
     },

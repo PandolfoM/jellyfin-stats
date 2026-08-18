@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist-types",
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "moduleResolution": "Bundler",
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "types": ["@testing-library/jest-dom/vitest"]
+  },
+  "include": ["src/**/*"],
+  "references": [{ "path": "../server" }, { "path": "../../packages/shared" }]
+}

@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+/*
+ * This dashboard is designed to live on a TV or a second monitor, so dark is
+ * the only theme — there is no light palette to fall back to, and no `.dark`
+ * class gate. The tokens below sit directly on `:root`.
+ *
+ * The accent is a restrained violet: a nod to the bias-lighting glow people
+ * put behind a TV, used sparingly for primary actions and focus rings rather
+ * than washed across the page.
+ */
+:root {
+  --radius: 0.75rem;
+
+  --background: #0a0b0e;
+  --foreground: #eceef2;
+
+  --card: #121319;
+  --card-foreground: #eceef2;
+
+  --primary: #7c3aed;
+  --primary-foreground: #faf9ff;
+
+  --secondary: #1c1e26;
+  --secondary-foreground: #eceef2;
+
+  --muted: #171820;
+  --muted-foreground: #9799a6;
+
+  --accent: #1f2029;
+  --accent-foreground: #eceef2;
+
+  --destructive: #e5484d;
+  --destructive-foreground: #faf9ff;
+
+  --border: #22242e;
+  --input: #22242e;
+  --ring: #8b7cf9;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  /* A stats dashboard is mostly numbers in cards and table columns — tabular
+     figures keep them aligned instead of jittering as digit widths change. */
+  font-variant-numeric: tabular-nums;
+}
