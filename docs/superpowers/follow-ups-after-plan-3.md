@@ -72,7 +72,16 @@ later plan closed an item in passing.
     and the settings "no editable control" tests not querying `role=switch`, `combobox`, or
     `slider`.
 
-12. **Test-harness sensitivities worth knowing when triaging a flake.** The chart tests couple to
+12. **The testcontainers reaper is the suite's one real flake source.** A full `pnpm test` can
+    fail with `Error: Expected Reaper to map exposed port 8080` when many container-backed suites
+    start at once — testcontainers' Ryuk helper losing a port race, not a defect in this code. It
+    was observed twice in a row after heavy `docker compose` churn, failing differently each time
+    (four tests, then one suite), and the affected file passed immediately in isolation and the
+    full suite passed green on the next run. **Triage rule: if a failure names Reaper or Ryuk,
+    re-run before investigating.** A `--pool=forks --poolOptions.forks.singleFork` run, or reusing
+    one container across suites, would remove the contention if it becomes tiresome.
+
+13. **Test-harness sensitivities worth knowing when triaging a flake.** The chart tests couple to
     Recharts' internal `.recharts-*` class names and need a jsdom `ResizeObserver` /
     `getBoundingClientRect` polyfill that lives in `WatchTimeChart.test.tsx`; extract it if a second
     chart appears. `apps/web/vitest.setup.ts` sits outside every tsconfig `include`, so a type error
