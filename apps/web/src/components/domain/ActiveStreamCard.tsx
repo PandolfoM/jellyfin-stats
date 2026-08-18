@@ -35,12 +35,15 @@ function ticksToMs(ticks: number): number {
  *
  * `LiveSession` (packages/shared/src/session.ts) carries no image tag — the
  * server's `/Sessions` snapshot never has one, only `itemId`/`itemName` — so
- * `PosterImage` is always given `tag={null}` here, which renders its own
- * fallback icon instead of attempting a request. This isn't a workaround;
- * it's the honest rendering of what the wire payload actually contains. A
- * future task that enriches `LiveSession` with a real image tag (joining
- * against the reference `items` table by `itemId`) is what would make real
- * poster art here possible — out of scope for this one.
+ * `PosterImage` is always given `tag={null}` here. That still requests the
+ * item's real primary image through our own proxy: a tag is only ever a
+ * cache-busting hint to Jellyfin, not a prerequisite, so `PosterImage`
+ * requests `/api/images/items/:itemId` with no `tag` query parameter rather
+ * than skipping the request outright (see `PosterImage`'s own doc comment).
+ * A future task that enriches `LiveSession` with a real image tag (joining
+ * against the reference `items` table by `itemId`) would let the *browser's*
+ * cache treat a changed poster as a new URL — a nice-to-have, not a
+ * prerequisite for showing real art here, which already works today.
  */
 export function ActiveStreamCard({ session, variant }: ActiveStreamCardProps) {
   const isCompact = variant === "compact";

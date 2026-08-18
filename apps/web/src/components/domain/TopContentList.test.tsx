@@ -7,28 +7,29 @@ import { TopContentList } from "./TopContentList";
 
 afterEach(() => vi.restoreAllMocks());
 
-const ITEMS: TopItemsResponse = [
-  {
-    itemId: "0123456789abcdef0123456789abcdef",
-    name: "Example Movie One",
-    type: "Movie",
-    libraryId: "library-a",
-    seriesId: null,
-    imageTag: "tag-a",
-    plays: 12,
-    watchMs: 7_200_000,
-  },
-  {
-    itemId: "fedcba9876543210fedcba9876543210",
-    name: "Example Show Episode",
-    type: "Episode",
-    libraryId: "library-b",
-    seriesId: "series-a",
-    imageTag: null,
-    plays: 4,
-    watchMs: 1_500_000,
-  },
-];
+const TAGGED_ITEM: TopItemsResponse[number] = {
+  itemId: "0123456789abcdef0123456789abcdef",
+  name: "Example Movie One",
+  type: "Movie",
+  libraryId: "library-a",
+  seriesId: null,
+  imageTag: "tag-a",
+  plays: 12,
+  watchMs: 7_200_000,
+};
+
+const UNTAGGED_ITEM: TopItemsResponse[number] = {
+  itemId: "fedcba9876543210fedcba9876543210",
+  name: "Example Show Episode",
+  type: "Episode",
+  libraryId: "library-b",
+  seriesId: "series-a",
+  imageTag: null,
+  plays: 4,
+  watchMs: 1_500_000,
+};
+
+const ITEMS: TopItemsResponse = [TAGGED_ITEM, UNTAGGED_ITEM];
 
 describe("TopContentList", () => {
   it("renders an EmptyState for an empty list", () => {
@@ -59,12 +60,26 @@ describe("TopContentList", () => {
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
-  it("never renders a broken-image icon for an item with no poster tag", () => {
+  // PosterImage (see its own test file) requests an item's primary image
+  // even when `imageTag` is null — a missing tag is a missing cache-busting
+  // hint, not a missing image, since apps/server/src/api/routes/images.ts
+  // treats `tag` as optional. TopContentList's own job is only to pass each
+  // item's real `imageTag` straight through unmodified; this proves it does
+  // exactly that for both an item that has one and one that doesn't, rather
+  // than special-casing either.
+  it("passes each item's real imageTag straight through to PosterImage, tagged or not", () => {
     render(<TopContentList items={ITEMS} loading={false} />);
 
-    // "Example Show Episode" has imageTag: null — its row must fall back to
-    // PosterImage's placeholder, not an <img> the browser can fail to load.
-    const images = document.querySelectorAll("img");
-    expect(images).toHaveLength(1); // only the item that has a tag
+    const images = Array.from(document.querySelectorAll("img"));
+    expect(images).toHaveLength(2);
+
+    const taggedSrc = images.find((img) => img.getAttribute("src")?.includes(TAGGED_ITEM.itemId))?.getAttribute("src");
+    const untaggedSrc = images
+      .find((img) => img.getAttribute("src")?.includes(UNTAGGED_ITEM.itemId))
+      ?.getAttribute("src");
+
+    expect(taggedSrc).toBe(`/api/images/items/${TAGGED_ITEM.itemId}?tag=${TAGGED_ITEM.imageTag}`);
+    // No tag= at all for the untagged item — not a stringified null/undefined.
+    expect(untaggedSrc).toBe(`/api/images/items/${UNTAGGED_ITEM.itemId}`);
   });
 });

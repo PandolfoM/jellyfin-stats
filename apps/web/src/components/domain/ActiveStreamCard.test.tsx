@@ -86,13 +86,19 @@ describe("ActiveStreamCard", () => {
   });
 
   // The security-relevant assertion this component owns: LiveSession carries
-  // no image tag, so this must never fabricate one and must never render a
-  // real <img> pointed anywhere — only PosterImage's own placeholder.
-  it("never renders an <img> element — LiveSession has no image tag to give PosterImage", () => {
-    const { container } = render(<ActiveStreamCard session={BASE_SESSION} variant="full" />);
+  // no image tag, but PosterImage still requests the item's primary image
+  // (a missing tag is a missing cache-busting hint, not a missing image —
+  // see PosterImage.test.tsx). What this must never do is fabricate a tag,
+  // or point anywhere but our own proxy.
+  it("requests the poster through our own proxy, with no tag, and never a Jellyfin URL", () => {
+    render(<ActiveStreamCard session={BASE_SESSION} variant="full" />);
 
-    expect(container.querySelector("img")).not.toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Poster for Sample Movie One" })).toBeInTheDocument();
+    const img = screen.getByRole("img", { name: "Poster for Sample Movie One" });
+    expect(img.tagName).toBe("IMG");
+    const src = img.getAttribute("src") ?? "";
+    expect(src).toBe(`/api/images/items/${BASE_SESSION.itemId}`);
+    expect(src).not.toContain("tag=");
+    expect(src).not.toMatch(/^https?:\/\//);
   });
 
   it("renders one card per distinct session when used in a list, keyed by sessionId", () => {
