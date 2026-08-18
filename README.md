@@ -7,18 +7,21 @@ Jellyfin administrators sign in with their existing Jellyfin credentials.
 
 ## Status
 
-Plans 1 and 2 of 3 are complete: the data pipeline runs and the HTTP API is live.
-The web UI (Plan 3) is not built yet.
+All three plans are complete: the data pipeline runs, the HTTP API is live, and the
+web UI is built and packaged. `docker compose up -d` brings up the whole stack —
+Postgres, Redis, the sync worker, and the API serving the built dashboard — from one
+command; see [Running the app](#running-the-app) for that flow and for the
+alternative two-terminal dev setup.
 
 ## Requirements
 
-- Docker and Docker Compose — **for Postgres and Redis only**. There is no
-  production image for this app yet. `docker compose up` starts the two
-  datastores and nothing else.
-- Node 22+ and pnpm 10+ — required to *run* the app, not just to develop it. Both
-  long-running processes (the sync worker and the HTTP API) run on the host under
-  `tsx`, started by hand or by whatever supervisor you point at them. There is no
-  packaged deployment yet.
+- Docker and Docker Compose. In production (`docker compose up -d`) this runs
+  everything: Postgres, Redis, the sync worker, and the API, which also serves the
+  built web UI on one port. For local development, Docker is needed only for
+  Postgres and Redis — the worker, API, and Vite dev server run on the host instead;
+  see [Running the app](#running-the-app).
+- Node 22+ and pnpm 10+ — required for local development (see above), and to run
+  the one-off `migrate:push`/`seed`/`backfill` scripts against either setup.
 - A Jellyfin server and an API key (Jellyfin: Dashboard → API Keys)
 
 ## Setup
@@ -95,11 +98,71 @@ script advances the parsed `--to` by one UTC day before calling it.) This touche
 only `playback_rollup_daily` and reads `playback_sessions`, so unlike the seed it adds
 no fake data.
 
+## Running the app
+
+Two ways to run the whole stack, covering the same code: a two-terminal setup for
+developing against it, and one command for running it like a deployed service.
+
+### Development (two terminals)
+
+Postgres and Redis run under Docker (`docker compose up -d`, per Setup above); the
+API and the web UI's Vite dev server both run on the host, in two separate
+terminals:
+
+```bash
+# terminal 1 — the HTTP API, listening on PORT (default 3000)
+pnpm --filter @jfstats/server dev:api
+
+# terminal 2 — the Vite dev server (default http://localhost:5173)
+pnpm --filter @jfstats/web dev
+```
+
+Open the URL Vite prints (normally `http://localhost:5173`), not the API's own
+port — Vite's dev server proxies `/api/*` requests to the API (see
+`apps/web/vite.config.ts`) so the browser stays same-origin and the session cookie
+behaves exactly as it does in production. Sign in with a real Jellyfin
+administrator account.
+
+The dashboard needs data to be interesting. Either run
+`pnpm --filter @jfstats/server dev:worker` in a third terminal to sync a real
+Jellyfin server, or skip that and run `pnpm --filter @jfstats/server seed` once
+for 90 days of fake history instead (see Setup, above).
+
+### Production (`docker compose up -d`)
+
+```bash
+cp .env.example .env
+# Fill in JELLYFIN_URL, JELLYFIN_API_KEY, and POSTGRES_PASSWORD.
+docker compose up -d
+```
+
+This builds and runs everything from the one `Dockerfile`: Postgres, Redis, a
+one-shot `migrate` service that applies schema migrations and exits, the sync
+worker, and the API — which also serves the built web UI, so the whole dashboard
+is one origin, `http://localhost:3000` by default (`PORT` in `.env` changes it;
+`docker-compose.yml` publishes whatever `PORT` is set to). There is no separate
+web server or build step to run by hand; `docker compose build` produces the SPA
+as part of the API image.
+
+**`JELLYFIN_URL` must be reachable from inside a container, not just from your
+host.** A common setup runs Jellyfin on the same machine as this stack, with
+`.env` pointing `JELLYFIN_URL` at something like `http://localhost:8096` — that
+works for the host-side dev flow above, but breaks under `docker compose up -d`:
+inside a container, `localhost` means the container itself, not the host machine,
+so the worker and API can never reach Jellyfin. Unlike `DATABASE_URL`/`REDIS_URL`
+(which `docker-compose.yml` already repoints at the `postgres`/`redis` services on
+the compose network), `docker-compose.yml` cannot fix this one for you, because
+Jellyfin is not a compose service it manages. Point `JELLYFIN_URL` at something a
+container can actually reach: your machine's LAN IP or a real hostname, or
+`host.docker.internal` if you're on Docker Desktop (Docker Desktop resolves it to
+the host automatically; it is not available on plain Linux Docker Engine without
+extra configuration).
+
 ## Configuration
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `JELLYFIN_URL` | — | Base URL of your Jellyfin server (required) |
+| `JELLYFIN_URL` | — | Base URL of your Jellyfin server (required); must be reachable *from inside a container* under `docker compose up -d` — see [Running the app](#running-the-app) |
 | `JELLYFIN_API_KEY` | — | Jellyfin API key used for syncing (required) |
 | `DATABASE_URL` | — | Postgres connection string (required) |
 | `REDIS_URL` | — | Redis connection string (required) |
@@ -204,6 +267,36 @@ Two configuration decisions are worth understanding before deploying:
 pnpm test        # full suite; Docker must be running for integration tests
 pnpm typecheck   # workspace-wide
 ```
+
+### End-to-end tests
+
+`e2e/smoke.spec.ts` (Playwright) drives a real browser against a running stack at
+`http://localhost:3000` — start it first with `docker compose up -d`, or point
+`E2E_BASE_URL` at wherever it's actually running. The browser binary is a separate,
+one-time download:
+
+```bash
+pnpm exec playwright install chromium
+pnpm test:e2e
+```
+
+Most of the suite needs no credentials at all: it covers the anonymous redirect to
+`/login`, the login screen rendering, an anonymous deep link also landing on
+`/login` instead of 404ing, and a deliberately wrong username/password showing the
+invalid-credentials message.
+
+The one test that actually signs in — verifying a successful login reaches the
+dashboard with real data, a deep link survives a page reload, and logout returns to
+`/login` — needs a real Jellyfin administrator account. Set both:
+
+```bash
+E2E_JELLYFIN_USER=youradmin E2E_JELLYFIN_PASSWORD=yourpassword pnpm test:e2e
+```
+
+Neither variable is stored anywhere by this repo — they're read from the
+environment for the one login request and nothing else. **Without both set, that
+one test reports as `skipped`, not passing and not failing** — check the test
+output for that distinction rather than assuming a green run exercised it.
 
 ## How watch time is measured
 

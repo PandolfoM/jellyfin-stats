@@ -2,18 +2,22 @@
   "name": "jellyfin-stats",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "packageManager": "pnpm@10.27.0",
   "scripts": {
     "typecheck": "tsc --build",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "build": "pnpm -r build"
   },
   "dependencies": {
     "tsx": "^4.19.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^22.10.0",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
