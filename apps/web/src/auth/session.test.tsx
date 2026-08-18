@@ -63,9 +63,28 @@ describe("SessionProvider", () => {
 
     renderProbe();
 
-    // Showing a login form because the server broke invites the user to type
-    // their password at a service that cannot check it.
-    await waitFor(() => expect(screen.getByTestId("status")).not.toHaveTextContent("anonymous"));
+    // A positive assertion, not `not.toHaveTextContent("anonymous")`: the
+    // initial render is "loading", which already satisfies a negative check
+    // on its very first tick, before the mocked fetch has even settled —
+    // `waitFor` stops at the first passing check, so that phrasing would
+    // pass even if a 500 mapped to "anonymous" a moment later, or hung
+    // forever. Asserting the actual destination state is what proves this.
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("error"));
+  });
+
+  it("treats a network failure (fetch itself rejecting) as an error, not indefinite loading", async () => {
+    // Not an error *status* — an actual rejected promise, as happens when the
+    // server is unreachable (connection refused, DNS failure, offline).
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Failed to fetch");
+      }),
+    );
+
+    renderProbe();
+
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("error"));
   });
 
   it("becomes authenticated after a successful login", async () => {

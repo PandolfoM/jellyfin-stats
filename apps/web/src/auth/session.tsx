@@ -86,9 +86,12 @@ const ANONYMOUS_STATE: SessionState = { status: "anonymous", user: null, error: 
  * collapsed into "anonymous".
  */
 async function resolveSession(): Promise<SessionState> {
-  const response = await api.api.auth.me.$get();
-
   try {
+    // `$get()` itself can reject (server unreachable, DNS failure, offline) —
+    // it has to be inside this try too, not just the `unwrap` call below, or
+    // a network-level failure escapes as a rejection instead of an "error"
+    // state, leaving the caller stuck on "loading" forever.
+    const response = await api.api.auth.me.$get();
     const user = await unwrap<SessionUser>(response);
     return { status: "authenticated", user, error: null };
   } catch (err) {
