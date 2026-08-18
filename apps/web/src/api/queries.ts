@@ -18,13 +18,19 @@ import { api, unwrap } from "./client";
 // caller at runtime; pinning to 200 here makes the static type match what
 // callers actually receive. `queries.test.ts` has a compile-time guard that
 // fails `pnpm typecheck` if this pin is ever dropped.
-type OverviewResponse = InferResponseType<typeof api.api.stats.overview.$get, 200>;
-type SeriesResponse = InferResponseType<typeof api.api.stats.series.$get, 200>;
-type TopItemsResponse = InferResponseType<(typeof api.api.stats)["top-items"]["$get"], 200>;
-type UserStatsResponse = InferResponseType<typeof api.api.stats.users.$get, 200>;
-type UserDetailResponse = InferResponseType<(typeof api.api.stats.users)[":userId"]["$get"], 200>;
-type LibraryStatsResponse = InferResponseType<typeof api.api.stats.libraries.$get, 200>;
-type HistoryResponse = InferResponseType<typeof api.api.history.$get, 200>;
+// Exported (not just module-local) so domain components can derive their prop
+// types from the same source instead of re-declaring the response shape by
+// hand — see apps/web/src/components/domain/*.tsx. A hand-written prop
+// interface that drifts from the API is this repo's most expensive recurring
+// defect class; deriving from these keeps drift impossible rather than
+// merely unlikely.
+export type OverviewResponse = InferResponseType<typeof api.api.stats.overview.$get, 200>;
+export type SeriesResponse = InferResponseType<typeof api.api.stats.series.$get, 200>;
+export type TopItemsResponse = InferResponseType<(typeof api.api.stats)["top-items"]["$get"], 200>;
+export type UserStatsResponse = InferResponseType<typeof api.api.stats.users.$get, 200>;
+export type UserDetailResponse = InferResponseType<(typeof api.api.stats.users)[":userId"]["$get"], 200>;
+export type LibraryStatsResponse = InferResponseType<typeof api.api.stats.libraries.$get, 200>;
+export type HistoryResponse = InferResponseType<typeof api.api.history.$get, 200>;
 
 export interface TopItemsOptions {
   limit?: number;
