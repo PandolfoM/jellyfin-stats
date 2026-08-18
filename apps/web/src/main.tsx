@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-import { SessionProvider, useSession } from "./auth/session";
-import { LoginRoute } from "./routes/login";
+import { SessionProvider } from "./auth/session";
+import { createAppRouter } from "./router";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -17,36 +18,14 @@ const queryClient = new QueryClient({
   },
 });
 
-/**
- * Stands in for the real router and protected-route gate that a later task
- * adds. It only needs to make `SessionProvider`'s four states visible: the
- * loading flash before `/api/auth/me` resolves, an anonymous visitor sent to
- * the login screen, a broken server surfaced instead of a login form that
- * cannot possibly succeed, and an authenticated session reaching the app.
- */
-function AppShell() {
-  const { status } = useSession();
-
-  if (status === "loading") {
-    return (
-      <div className="flex min-h-svh items-center justify-center text-muted-foreground">Loading…</div>
-    );
-  }
-
-  if (status === "error") {
-    return (
-      <div className="flex min-h-svh items-center justify-center text-destructive">
-        Could not reach the server. Try refreshing the page.
-      </div>
-    );
-  }
-
-  if (status === "anonymous") {
-    return <LoginRoute />;
-  }
-
-  return <p>Jellyfin Stats</p>;
-}
+// Not registered with `declare module "@tanstack/react-router" { interface
+// Register { router: typeof router } }` yet: AppShell links to /live,
+// /history, /users, /libraries, and /settings, none of which have a route
+// definition until Tasks 8–11 add them. Registering now would make every one
+// of those `Link to="..."` props a type error. Whoever adds the last of
+// those routes should add the registration then, for full type-safety on
+// navigation.
+const router = createAppRouter();
 
 const root = document.getElementById("root");
 
@@ -55,7 +34,7 @@ if (root !== null) {
     <StrictMode>
       <QueryClientProvider client={queryClient}>
         <SessionProvider>
-          <AppShell />
+          <RouterProvider router={router} />
         </SessionProvider>
       </QueryClientProvider>
     </StrictMode>,
