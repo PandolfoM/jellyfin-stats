@@ -8,7 +8,14 @@ const schema = z.object({
   JELLYFIN_API_KEY: z.string().min(1),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
-  SESSION_SECRET: z.string().min(32),
+  // No SESSION_SECRET. Session ids are 32 random bytes stored in Redis, and every
+  // gated request round-trips to Redis to resolve one — that lookup is the
+  // authoritative check, so signing the cookie could never change an outcome (a
+  // correctly-signed id for a destroyed session still fails; an unsigned id for a
+  // live session still succeeds). Requiring one, with a key-generation ritual in
+  // the setup instructions, taught operators it was load-bearing when nothing
+  // read it. This schema is non-strict, so an existing .env that still carries
+  // the line keeps working.
   SESSION_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
   REFERENCE_SYNC_INTERVAL_MS: z.coerce.number().int().positive().default(900_000),
   COMPLETION_THRESHOLD: z.coerce.number().min(0).max(1).default(0.9),
@@ -16,6 +23,21 @@ const schema = z.object({
   FALLBACK_ADMIN_PASSWORD: z.string().min(1).optional(),
   PORT: z.coerce.number().int().positive().default(3000),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+  // Secure cookies are dropped over plain HTTP, which is how most self-hosted
+  // first runs happen. Default off; the README says to turn it on behind TLS.
+  COOKIE_SECURE: z
+    .enum(["true", "false"])
+    .catch("false")
+    .transform((value) => value === "true"),
+  SESSION_TTL_HOURS: z.coerce.number().int().positive().default(168),
+  // Off by default: X-Forwarded-For is client-settable, so trusting it without a
+  // reverse proxy in front lets any client mint a fresh rate-limit identity on
+  // every request. Turn this on only when a proxy that actually sets/overwrites
+  // the header sits in front of the app.
+  TRUST_PROXY_HEADERS: z
+    .enum(["true", "false"])
+    .catch("false")
+    .transform((value) => value === "true"),
 });
 
 export type AppEnv = z.infer<typeof schema> & {

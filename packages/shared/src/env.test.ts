@@ -6,7 +6,6 @@ const valid = {
   JELLYFIN_API_KEY: "test-key",
   DATABASE_URL: "postgres://u:p@localhost:5432/db",
   REDIS_URL: "redis://localhost:6379",
-  SESSION_SECRET: "a".repeat(64),
 };
 
 describe("loadEnv", () => {
@@ -33,8 +32,20 @@ describe("loadEnv", () => {
     expect(() => loadEnv(missing)).toThrow(/JELLYFIN_API_KEY/);
   });
 
-  it("rejects a session secret shorter than 32 characters", () => {
-    expect(() => loadEnv({ ...valid, SESSION_SECRET: "short" })).toThrow(/SESSION_SECRET/);
+  it("loads without a SESSION_SECRET, which nothing reads", () => {
+    // Session ids are 32 random bytes in Redis and every gated request
+    // round-trips to Redis to resolve one, so there is nothing for a signing
+    // secret to do. It used to be required, with an `openssl rand -hex 32`
+    // ritual in the setup instructions, which taught operators it was
+    // load-bearing. This pins the removal so it cannot creep back.
+    expect(() => loadEnv(valid)).not.toThrow();
+    expect(Object.keys(loadEnv(valid))).not.toContain("SESSION_SECRET");
+  });
+
+  it("still loads when an existing .env carries a SESSION_SECRET line", () => {
+    // Backward compatibility: the schema is a non-strict z.object, so an
+    // operator upgrading in place does not have to edit their .env at all.
+    expect(() => loadEnv({ ...valid, SESSION_SECRET: "a".repeat(64) })).not.toThrow();
   });
 
   it("rejects a completion threshold above 1", () => {
@@ -50,5 +61,35 @@ describe("loadEnv", () => {
       FALLBACK_ADMIN_PASSWORD: "rescue-password",
     });
     expect(both.fallbackAdminEnabled).toBe(true);
+  });
+});
+
+describe("cookie and session configuration", () => {
+  it("defaults COOKIE_SECURE to false so a first run over plain HTTP works", () => {
+    expect(loadEnv(valid).COOKIE_SECURE).toBe(false);
+  });
+
+  it("accepts the string 'true' from a .env file", () => {
+    expect(loadEnv({ ...valid, COOKIE_SECURE: "true" }).COOKIE_SECURE).toBe(true);
+  });
+
+  it("treats any other value as false rather than throwing", () => {
+    expect(loadEnv({ ...valid, COOKIE_SECURE: "yes" }).COOKIE_SECURE).toBe(false);
+  });
+
+  it("defaults the session lifetime to a week", () => {
+    expect(loadEnv(valid).SESSION_TTL_HOURS).toBe(168);
+  });
+
+  it("rejects a non-positive session lifetime", () => {
+    expect(() => loadEnv({ ...valid, SESSION_TTL_HOURS: "0" })).toThrow(/SESSION_TTL_HOURS/);
+  });
+
+  it("defaults TRUST_PROXY_HEADERS to false, so a direct unproxied deployment isn't spoofable", () => {
+    expect(loadEnv(valid).TRUST_PROXY_HEADERS).toBe(false);
+  });
+
+  it("accepts the string 'true' from a .env file for TRUST_PROXY_HEADERS", () => {
+    expect(loadEnv({ ...valid, TRUST_PROXY_HEADERS: "true" }).TRUST_PROXY_HEADERS).toBe(true);
   });
 });

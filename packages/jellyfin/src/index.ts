@@ -6,3 +6,4 @@ export {
   type JellyfinLibrary,
   type JellyfinUser,
 } from "./client.js";
+export { JellyfinAuthError, type JellyfinAuthResult } from "./auth.js";

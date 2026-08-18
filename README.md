@@ -7,21 +7,25 @@ Jellyfin administrators sign in with their existing Jellyfin credentials.
 
 ## Status
 
-Plan 1 of 3 is complete: the data pipeline runs. The HTTP API (Plan 2) and web UI
-(Plan 3) are not built yet.
+Plans 1 and 2 of 3 are complete: the data pipeline runs and the HTTP API is live.
+The web UI (Plan 3) is not built yet.
 
 ## Requirements
 
-- Docker and Docker Compose
-- Node 22+ and pnpm 10+ for development
+- Docker and Docker Compose — **for Postgres and Redis only**. There is no
+  production image for this app yet. `docker compose up` starts the two
+  datastores and nothing else.
+- Node 22+ and pnpm 10+ — required to *run* the app, not just to develop it. Both
+  long-running processes (the sync worker and the HTTP API) run on the host under
+  `tsx`, started by hand or by whatever supervisor you point at them. There is no
+  packaged deployment yet.
 - A Jellyfin server and an API key (Jellyfin: Dashboard → API Keys)
 
 ## Setup
 
 ```bash
 cp .env.example .env
-# Fill in JELLYFIN_URL, JELLYFIN_API_KEY, POSTGRES_PASSWORD, and SESSION_SECRET.
-# Generate a secret with: openssl rand -hex 32
+# Fill in JELLYFIN_URL, JELLYFIN_API_KEY, and POSTGRES_PASSWORD.
 ```
 
 `.env` is gitignored. Never commit real credentials.
@@ -99,14 +103,100 @@ no fake data.
 | `JELLYFIN_API_KEY` | — | Jellyfin API key used for syncing (required) |
 | `DATABASE_URL` | — | Postgres connection string (required) |
 | `REDIS_URL` | — | Redis connection string (required) |
-| `SESSION_SECRET` | — | 32+ characters, used in Plan 2 (required) |
+| `FALLBACK_ADMIN_USER` | unset | Optional emergency admin username; see [Authentication](#authentication) |
+| `FALLBACK_ADMIN_PASSWORD` | unset | Optional emergency admin password; both must be set to activate |
 | `SESSION_POLL_INTERVAL_MS` | `5000` | How often active sessions are polled |
 | `REFERENCE_SYNC_INTERVAL_MS` | `900000` | How often users and libraries refresh |
 | `COMPLETION_THRESHOLD` | `0.9` | Fraction of runtime that counts as watched |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
-| `PORT` | `3000` | Reserved for the HTTP API (Plan 2); unused so far |
+| `PORT` | `3000` | Port the HTTP API listens on |
+| `COOKIE_SECURE` | `false` | Marks the session cookie `Secure`; see [Running the API](#running-the-api) |
+| `SESSION_TTL_HOURS` | `168` | Session lifetime (sliding); see [Running the API](#running-the-api) |
+| `TRUST_PROXY_HEADERS` | `false` | Trust `X-Forwarded-For` for rate limiting; see [Running the API](#running-the-api) |
 | `POSTGRES_PORT` | `5432` | Host port docker-compose publishes Postgres on |
 | `REDIS_PORT` | `6379` | Host port docker-compose publishes Redis on |
+
+## API
+
+The HTTP API is a Hono app served by `pnpm --filter @jfstats/server dev:api` (script:
+`tsx --env-file=../../.env src/api.ts`), listening on `PORT` (default `3000`). It is a
+separate long-running process from the worker — `dev:worker` and `dev:api` both run on
+the host and neither depends on the other being up.
+
+### Authentication
+
+Jellyfin administrators sign in with their existing Jellyfin username and password. The
+API never stores the password, and revokes the Jellyfin access token it requests for
+the login check immediately after using it, regardless of whether the user turns out to
+be an admin. A successful login sets an opaque, httpOnly, `SameSite=Lax` session cookie
+(`jfstats_session`); the session record itself lives server-side in Redis, not in the
+cookie.
+
+| Endpoint | Auth | Notes |
+|---|---|---|
+| `POST /api/auth/login` | none | Body: `{ "username": "...", "password": "..." }`. Rate-limited to 10 attempts per 15 minutes per client (see `TRUST_PROXY_HEADERS` below). On success: `200` with `{ userId, userName, isAdmin: true }`, and the session cookie is set. Otherwise: `400 invalid_request` (malformed body), `401 invalid_credentials`, `403 not_an_administrator` (a valid Jellyfin login that isn't an admin), `429 too_many_attempts`, or `503 jellyfin_unavailable`. |
+| `POST /api/auth/logout` | none | Destroys the session and clears the cookie. Always `200 { ok: true }`, even with no session present. |
+| `GET /api/auth/me` | session cookie | `200` with `{ userId, userName, isAdmin }` if the cookie names a live admin session, else `401 unauthenticated`. Goes through the same admin gate as the data routes below, so it re-checks admin status and refreshes both the session and the cookie — polling it keeps a session alive on both sides, not just server-side. |
+
+An optional emergency fallback admin (`FALLBACK_ADMIN_USER` / `FALLBACK_ADMIN_PASSWORD`,
+both required together to activate, and commented out in `.env.example`) is checked
+before Jellyfin, so it still works when Jellyfin itself is unreachable. Leave both unset
+— the shipped default — to disable it. When set, it is a standing username/password on
+your dashboard that does not expire with a Jellyfin account, so use a long random
+password and remove it once you no longer need the recovery path.
+
+### Statistics, history, live feed, and images
+
+Every route below requires a valid admin session — the cookie set by
+`/api/auth/login`. Without one, each answers `401 { "error": "unauthenticated" }`
+before any query parameter is even parsed. `GET /api/health` is the only endpoint in
+the whole API that does not require a session; it always answers `200 { status: "ok" }`,
+for use as a liveness check.
+
+`from`/`to` below are `YYYY-MM-DD` UTC calendar days. On the `/api/stats/*` routes,
+omitting either (or both) defaults to the trailing 30 days ending today (UTC). An
+unparsable or out-of-order range answers `400 { "error": "invalid_range" }`, as does a
+range spanning more than 1000 days — the day-by-day series is built from a
+`generate_series` spine, so an unbounded span turns one request into millions of rows.
+
+| Endpoint | Query parameters | Notes |
+|---|---|---|
+| `GET /api/stats/overview` | `from`, `to` | Aggregate totals for the range. |
+| `GET /api/stats/series` | `from`, `to` | Per-day watch-time series for the range. |
+| `GET /api/stats/top-items` | `from`, `to`, `limit` (default `10`, max `100`), `libraryId`, `userId` | Most-watched items, optionally scoped to a library or a user. |
+| `GET /api/stats/users` | `from`, `to` | Per-user totals. |
+| `GET /api/stats/users/:userId` | `from`, `to` | One user's detail; `404 { "error": "not_found" }` for an unknown id. |
+| `GET /api/stats/libraries` | `from`, `to` | Per-library totals. |
+| `GET /api/history` | `limit` (default `50`, max `200`), `offset` (default `0`), `userId`, `libraryId`, `from`, `to` | Paginated playback history. Unlike the `/api/stats/*` routes, `from`/`to` here are not defaulted: if neither is given, no date filter is applied at all. Giving one without the other fills in the missing side using the same 30-day default as the stats routes. |
+| `GET /api/live` | — | Server-Sent Events. Emits a `sessions` event (a JSON array) immediately on connect with whatever is currently playing, then again on every change; sends a heartbeat comment roughly every 25s so idle-timeout proxies don't close the connection. |
+| `GET /api/images/items/:itemId` | `tag`, `maxWidth` (default `400`, max `1000`) | Proxies one item's poster art from Jellyfin, so the browser needs neither the Jellyfin API key nor direct network access to Jellyfin. `itemId` must be a 32-character hex GUID; anything else answers `400 { "error": "invalid_item_id" }` before any outbound request is made. Responses are cached `private` for 30 days, since they sit behind the admin gate. |
+
+### Running the API
+
+```bash
+pnpm --filter @jfstats/server dev:api
+```
+
+Two configuration decisions are worth understanding before deploying:
+
+- **`COOKIE_SECURE`** (default `false`) marks the session cookie `Secure`. Turn it on
+  once the API is served over HTTPS. Leaving it on while still serving over plain HTTP
+  doesn't raise an error — the browser silently drops a `Secure` cookie sent over an
+  insecure connection, which looks like a login that succeeds (the `200` response comes
+  back fine) and then is immediately logged out, because the cookie was never actually
+  stored.
+- **`TRUST_PROXY_HEADERS`** (default `false`) controls whether the login rate limiter
+  keys attempts by the `X-Forwarded-For` header instead of the raw TCP connection.
+  Enable it **only** when a reverse proxy you control sits in front of the API and sets
+  that header itself. Enabling it without a real proxy in front lets any client set its
+  own `X-Forwarded-For` on every request and mint a fresh rate-limit identity each time,
+  defeating login throttling entirely. Leaving it off behind a proxy is safer but
+  coarser: every request then arrives from the proxy's own address, so all clients
+  behind it share a single rate-limit bucket.
+- **`SESSION_TTL_HOURS`** (default `168`, i.e. 7 days) is the sliding session lifetime.
+  Both the Redis-backed session and the cookie's `maxAge` are refreshed on every
+  authenticated request, so an admin actively using the dashboard is not logged out
+  mid-session.
 
 ## Development
 
