@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { api } from "./client";
 import { ApiError, unwrap } from "./client";
 
 afterEach(() => vi.restoreAllMocks());
@@ -40,3 +41,35 @@ describe("unwrap", () => {
     });
   });
 });
+
+/**
+ * Type-only guard, one per route group threaded through `createApp`
+ * (apps/server/src/api/app.ts). This block runs no code — `vitest run` never
+ * evaluates it, and it produces no test-report entries — it exists purely to
+ * be checked by `tsc --build` (`pnpm typecheck`), which does cover this file:
+ * apps/web/tsconfig.json's `include: ["src/**\/*"]` reaches every .ts file
+ * under src, this test file included.
+ *
+ * Why this needs to be permanent rather than a throwaway probe: the only real
+ * caller of the typed client, apps/web/src/auth/session.tsx, touches
+ * `api.api.auth.*` exclusively — auth was already working before task-3b
+ * fixed the other four route groups. So reverting task-3b's server-side
+ * changes entirely leaves `pnpm test && pnpm typecheck` green with zero
+ * signal; nothing else in the repo exercises `api.api.stats`/`history`/
+ * `images`/`live`. Each line below fails to typecheck if its group's
+ * registrar (apps/server/src/api/routes/{stats,history,images,live}.ts) ever
+ * goes back to returning `void`, or otherwise drops out of the chain
+ * threaded through createApp — `api.api.<group>` would no longer have the
+ * property being accessed. That is exactly the class of defect ("the type
+ * link exists but nothing flows through it") that let the original bug pass
+ * an earlier review.
+ */
+type AssertCallable<T extends (...args: never[]) => unknown> = T;
+type _StatsOverviewIsCallable = AssertCallable<typeof api.api.stats.overview.$get>;
+type _HistoryIsCallable = AssertCallable<typeof api.api.history.$get>;
+// `typeof`'s type-query syntax only accepts a dotted identifier chain, not an
+// indexed access — `:itemId` isn't a valid identifier, so the path has to be
+// split: `typeof ...items` first, then `[":itemId"]["$get"]` as indexed
+// access types applied to that.
+type _ImagesItemIsCallable = AssertCallable<(typeof api.api.images.items)[":itemId"]["$get"]>;
+type _LiveIsCallable = AssertCallable<typeof api.api.live.$get>;

@@ -114,10 +114,11 @@ export function createImageFetcher(
 }
 
 // No explicit return-type interface on createApp below — an annotation there
-// would erase the richer, chained route schema that registerAuthRoutes hands
-// back (an annotated return type widens to the annotation, not the actual
-// inferred value). AppType is derived from the real return value instead, so
-// `hc<AppType>` on the web side sees the /api/auth/* routes rather than
+// would erase the richer, chained route schema that registerAuthRoutes (and
+// every registerXRoutes call threaded after it) hands back (an annotated
+// return type widens to the annotation, not the actual inferred value).
+// AppType is derived from the real return value instead, so `hc<AppType>` on
+// the web side sees every /api/* route registered below rather than
 // resolving to `unknown`.
 export function createApp(context: AppContext) {
   const app = new Hono<{ Variables: AppVariables }>();
