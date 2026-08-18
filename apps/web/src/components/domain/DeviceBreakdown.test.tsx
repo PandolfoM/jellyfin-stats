@@ -54,4 +54,24 @@ describe("DeviceBreakdown", () => {
     expect(bars[0]).toHaveStyle({ width: "100%" });
     expect(bars[1]).toHaveStyle({ width: `${(10 / 30) * 100}%` });
   });
+
+  // A non-empty list where every device has `plays: 0` would divide by
+  // zero (`0 / Math.max(...[0, 0])`) without the floor in the component —
+  // rendering `NaN%` bars, not `0%` ones. Not reachable through the real
+  // API today (a device only appears with at least one completed session),
+  // but nothing enforces that at the type level, so this is guarded
+  // directly rather than left to hold by convention alone.
+  it("renders 0%-width bars, not NaN%, when every device has zero plays", () => {
+    const zeroDevices: DeviceStat[] = [
+      { deviceId: "device-1", name: "Idle TV", plays: 0 },
+      { deviceId: "device-2", name: "Idle Phone", plays: 0 },
+    ];
+
+    render(<DeviceBreakdown devices={zeroDevices} loading={false} />);
+
+    const rows = screen.getAllByTestId("device-breakdown-row");
+    const bars = rows.map((row) => row.querySelector(".bg-primary"));
+    expect(bars[0]).toHaveStyle({ width: "0%" });
+    expect(bars[1]).toHaveStyle({ width: "0%" });
+  });
 });

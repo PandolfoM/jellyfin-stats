@@ -12,7 +12,7 @@
 //
 // Every navigation below goes through `renderApp` with a real path, never
 // a hand-picked id passed straight to the component (brief's trap #3).
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { renderApp } from "../test/renderApp";
@@ -71,13 +71,30 @@ function countCalls(calls: string[], pathIncludes: string): number {
 }
 
 describe("Library detail route", () => {
-  it("reads the libraryId from the real router param and shows that library's real name", async () => {
+  // A single test, two sequential navigations (with an explicit `cleanup()`
+  // between them, since `renderApp` mounts a fresh tree each call and this
+  // repo's global `afterEach(cleanup)` only runs between `it` blocks, not
+  // within one). This is deliberately one test rather than two separately-
+  // worded ones: a route that hardcoded (or defaulted to) the roster's
+  // first entry would pass the first assertion below and then fail the
+  // second, where a different id must resolve to a different library. Two
+  // independent tests — one per id — would not catch that regression,
+  // since each would only ever exercise its own single id in isolation.
+  // This also doubles as the not-found/zero-activity distinction: the
+  // second navigation's target is a *real*, zero-activity library, and
+  // asserting the not-found testid is absent there is what proves "not
+  // found" means "absent from the roster" rather than "nothing to show".
+  it("reads the libraryId from the real router param — a hardcoded id would pass one navigation but fail the other", async () => {
     mockFetch();
-
     renderApp("/libraries/library-alpha-1");
-
-    await screen.findByTestId("library-detail-route");
+    expect(await screen.findByTestId("library-detail-route")).toBeInTheDocument();
     expect(await screen.findByText("Movies")).toBeInTheDocument();
+
+    cleanup();
+    renderApp("/libraries/library-quiet-1");
+    expect(await screen.findByTestId("library-detail-route")).toBeInTheDocument();
+    expect(screen.queryByTestId("library-detail-not-found")).not.toBeInTheDocument();
+    expect(await screen.findByText("Home Videos")).toBeInTheDocument();
   });
 
   it("renders the not-found state for a libraryId absent from the roster", async () => {
@@ -88,19 +105,6 @@ describe("Library detail route", () => {
     expect(await screen.findByTestId("library-detail-not-found")).toBeInTheDocument();
     expect(screen.getByText("Library not found")).toBeInTheDocument();
     expect(screen.queryByTestId("library-detail-route")).not.toBeInTheDocument();
-  });
-
-  // The critical negative case: a real, zero-activity library IS in the
-  // roster and must render the normal page with zeros, never the
-  // not-found screen.
-  it("does NOT render the not-found state for a real library with zero activity in the range", async () => {
-    mockFetch();
-
-    renderApp("/libraries/library-quiet-1");
-
-    expect(await screen.findByTestId("library-detail-route")).toBeInTheDocument();
-    expect(screen.queryByTestId("library-detail-not-found")).not.toBeInTheDocument();
-    expect(await screen.findByText("Home Videos")).toBeInTheDocument();
   });
 
   it("shows Plays/Watch time but not Active users/Active items", async () => {

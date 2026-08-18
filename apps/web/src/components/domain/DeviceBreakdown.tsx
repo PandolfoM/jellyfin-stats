@@ -44,7 +44,13 @@ export function DeviceBreakdown({ devices, loading }: DeviceBreakdownProps) {
     return <EmptyState title="No devices" description="No sessions recorded in the selected range." />;
   }
 
-  const maxPlays = Math.max(...devices.map((device) => device.plays));
+  // Floored at 1, not just `Math.max(...devices.map(...))` — a device only
+  // appears here if it has at least one completed session (see the doc
+  // comment above), so every real row should have `plays >= 1`, but nothing
+  // enforces that at the type level. Without the floor, a list where every
+  // device happened to have `plays: 0` would divide by zero below and
+  // render `NaN%` bars instead of empty ones.
+  const maxPlays = Math.max(1, ...devices.map((device) => device.plays));
 
   return (
     <ul className="flex flex-col gap-3">
