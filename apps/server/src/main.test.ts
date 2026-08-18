@@ -1,8 +1,8 @@
 import { serve, type ServerType } from "@hono/node-server";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { closeApiServer } from "./api.js";
 import { registerLiveRoute } from "./api/routes/live.js";
+import { closeApiServer } from "./main.js";
 import { createShutdownHandler } from "./shutdown.js";
 
 /**
@@ -10,6 +10,10 @@ import { createShutdownHandler } from "./shutdown.js";
  * test IS Node's connection accounting: `server.close()`'s callback is deferred
  * until every in-flight connection has ended, and an SSE handler that parks on
  * `stream.onAbort` never ends one on its own.
+ *
+ * closeApiServer moved from api.ts to main.ts when the api/worker/migrate
+ * entrypoints were merged into one process; this file (renamed from
+ * api.test.ts) still exercises the same function, unchanged.
  */
 
 const HANG_WINDOW_MS = 750;
@@ -34,7 +38,7 @@ function startServer(app: Hono): Promise<{ server: ServerType; url: string }> {
   });
 }
 
-/** The teardown api.ts performs today: close the server, wait for the callback. */
+/** The teardown a bare server.close() performs, with no stream registry: close the server, wait for the callback. */
 function closeServerOnly(server: ServerType): Promise<void> {
   return new Promise((resolve, reject) => {
     server.close((error) => {
@@ -68,7 +72,7 @@ function liveApp() {
   return { app, streams };
 }
 
-describe("api shutdown with an open SSE stream", () => {
+describe("server shutdown with an open SSE stream", () => {
   it("hangs forever if the server is closed without first ending open streams", async () => {
     // Pins the failure mode this module's teardown exists to avoid, so a future
     // refactor that drops the stream registry fails here rather than in production.
@@ -138,7 +142,7 @@ describe("api shutdown with an open SSE stream", () => {
     // The composition that runs in production: SIGTERM → createShutdownHandler
     // → closeApiServer. Before the stream registry existed this exited via the
     // timeout at best, and in production not at all — closeContext never ran,
-    // so Postgres and Redis were never closed cleanly.
+    // so Postgres was never closed cleanly.
     const { app, streams } = liveApp();
     const { server, url } = await startServer(app);
 
@@ -150,8 +154,8 @@ describe("api shutdown with an open SSE stream", () => {
     const shutdown = createShutdownHandler({
       logger: { info: vi.fn(), error: vi.fn() },
       exit,
-      startMessage: "api shutting down",
-      failureMessage: "api shutdown failed",
+      startMessage: "shutting down",
+      failureMessage: "shutdown failed",
       onShutdown: () => closeApiServer(server, streams),
       timeoutMs: 2_000,
     });

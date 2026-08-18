@@ -5,8 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc --build",
-    "dev:worker": "tsx --env-file=../../.env src/worker.ts",
-    "dev:api": "tsx --env-file=../../.env src/api.ts",
+    "dev": "tsx --env-file=../../.env src/main.ts",
     "seed": "tsx --env-file=../../.env src/seed.ts",
     "backfill": "tsx --env-file=../../.env src/backfill.ts"
   },
