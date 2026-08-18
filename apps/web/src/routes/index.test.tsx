@@ -7,13 +7,10 @@
 // counts calls cannot tell "four distinct endpoints fired" apart from "one
 // endpoint fired four times", and cannot tell "the range picker's new value
 // reached the query" apart from "the component merely re-rendered".
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { SessionProvider } from "../auth/session";
-import { createAppRouter } from "../router";
+import { renderApp } from "../test/renderApp";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -60,16 +57,7 @@ function mockFetch(overrides: FetchOverrides = {}): string[] {
 }
 
 function renderOverview() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const router = createAppRouter(createMemoryHistory({ initialEntries: ["/"] }));
-  render(
-    <QueryClientProvider client={queryClient}>
-      <SessionProvider>
-        <RouterProvider router={router} />
-      </SessionProvider>
-    </QueryClientProvider>,
-  );
-  return router;
+  return renderApp("/");
 }
 
 /** URL query params for one recorded call, or `undefined` if nothing matched `pathIncludes`. */

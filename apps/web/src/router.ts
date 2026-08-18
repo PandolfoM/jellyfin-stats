@@ -2,6 +2,7 @@ import { createRoute, createRouter, type RouterHistory } from "@tanstack/react-r
 
 import { rootRoute } from "./routes/__root";
 import { indexRoute } from "./routes/index";
+import { liveRoute } from "./routes/live";
 import { LoginRoute } from "./routes/login";
 
 export const loginRoute = createRoute({
@@ -10,7 +11,7 @@ export const loginRoute = createRoute({
   component: LoginRoute,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, loginRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, liveRoute, loginRoute]);
 
 /**
  * Builds a router from the app's one route tree. `main.tsx` and the guard

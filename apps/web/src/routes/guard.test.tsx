@@ -8,13 +8,10 @@
 // never on whether the gate merely *stopped short* of rendering the wrong
 // thing, since the ordinary "loading" default already does that on the
 // first tick regardless of what the gate does next.
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
-import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
+import { screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { SessionProvider } from "../auth/session";
-import { createAppRouter } from "../router";
+import { renderApp } from "../test/renderApp";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -67,25 +64,12 @@ function mockAuthMeAndOverviewQueries(respond: () => Response | Promise<Response
   );
 }
 
-function renderAt(initialPath: string) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const router = createAppRouter(createMemoryHistory({ initialEntries: [initialPath] }));
-  render(
-    <QueryClientProvider client={queryClient}>
-      <SessionProvider>
-        <RouterProvider router={router} />
-      </SessionProvider>
-    </QueryClientProvider>,
-  );
-  return router;
-}
-
 describe("protected-route gate", () => {
   it("while the session is loading, renders a shell skeleton and no route content", async () => {
     // Never resolves — the assertion has to hold for as long as "loading" lasts.
     mockAuthMe(() => new Promise<Response>(() => {}));
 
-    renderAt("/");
+    renderApp("/");
 
     expect(await screen.findByTestId("shell-skeleton")).toBeInTheDocument();
     expect(screen.queryByTestId("overview-route")).not.toBeInTheDocument();
@@ -95,7 +79,7 @@ describe("protected-route gate", () => {
   it("redirects an anonymous visitor from a protected route to /login instead of rendering it", async () => {
     mockAuthMe(() => new Response("{}", { status: 401 }));
 
-    const router = renderAt("/");
+    const router = renderApp("/");
 
     await waitFor(() => expect(screen.getByLabelText("Username")).toBeInTheDocument());
     expect(screen.queryByTestId("overview-route")).not.toBeInTheDocument();
@@ -107,7 +91,7 @@ describe("protected-route gate", () => {
       () => new Response(AUTHENTICATED_BODY, { status: 200, headers: { "content-type": "application/json" } }),
     );
 
-    const router = renderAt("/");
+    const router = renderApp("/");
 
     expect(await screen.findByTestId("overview-route")).toBeInTheDocument();
     expect(screen.queryByLabelText("Username")).not.toBeInTheDocument();
@@ -117,7 +101,7 @@ describe("protected-route gate", () => {
   it("leaves /login reachable for an anonymous visitor and does not redirect away from it", async () => {
     mockAuthMe(() => new Response("{}", { status: 401 }));
 
-    const router = renderAt("/login");
+    const router = renderApp("/login");
 
     await waitFor(() => expect(screen.getByLabelText("Username")).toBeInTheDocument());
     expect(screen.queryByTestId("overview-route")).not.toBeInTheDocument();
@@ -130,7 +114,7 @@ describe("protected-route gate", () => {
   it("shows an error state — neither the protected route nor the login form — when the session cannot be resolved", async () => {
     mockAuthMe(() => new Response(JSON.stringify({ error: "internal_error" }), { status: 500 }));
 
-    renderAt("/");
+    renderApp("/");
 
     expect(await screen.findByTestId("session-error")).toBeInTheDocument();
     expect(screen.queryByTestId("overview-route")).not.toBeInTheDocument();
@@ -140,7 +124,7 @@ describe("protected-route gate", () => {
   it("shows the error state on /login too, rather than the login form a broken server can't honor", async () => {
     mockAuthMe(() => new Response(JSON.stringify({ error: "internal_error" }), { status: 500 }));
 
-    renderAt("/login");
+    renderApp("/login");
 
     expect(await screen.findByTestId("session-error")).toBeInTheDocument();
     expect(screen.queryByLabelText("Username")).not.toBeInTheDocument();

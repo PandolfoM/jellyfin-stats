@@ -19,12 +19,12 @@ const queryClient = new QueryClient({
 });
 
 // Not registered with `declare module "@tanstack/react-router" { interface
-// Register { router: typeof router } }` yet: AppShell links to /live,
+// Register { router: typeof router } }` yet: AppShell also links to
 // /history, /users, /libraries, and /settings, none of which have a route
-// definition until Tasks 8–11 add them. Registering now would make every one
-// of those `Link to="..."` props a type error. Whoever adds the last of
-// those routes should add the registration then, for full type-safety on
-// navigation.
+// definition until Tasks 9–11 add them (/live, Task 8, now does). Registering
+// now would make every one of those still-missing `Link to="..."` props a
+// type error. Whoever adds the last of those routes should add the
+// registration then, for full type-safety on navigation.
 const router = createAppRouter();
 
 const root = document.getElementById("root");

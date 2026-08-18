@@ -11,5 +11,5 @@
     "types": ["@testing-library/jest-dom/vitest"]
   },
   "include": ["src/**/*"],
-  "references": [{ "path": "../server" }]
+  "references": [{ "path": "../server" }, { "path": "../../packages/shared" }]
 }
