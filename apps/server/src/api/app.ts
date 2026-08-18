@@ -127,8 +127,8 @@ export function createApp(context: AppContext) {
 
   app.get("/api/health", (c) => c.json({ status: "ok" }));
 
-  const sessions = createSessionStore(context.redis, context.env.SESSION_TTL_HOURS * 60 * 60);
-  const rateLimiter = createRateLimiter(context.redis, { limit: 10, windowSeconds: 900 });
+  const sessions = createSessionStore(context.db, context.env.SESSION_TTL_HOURS * 60 * 60);
+  const rateLimiter = createRateLimiter(context.db, { limit: 10, windowSeconds: 900 });
 
   const cookieConfig = {
     cookieSecure: context.env.COOKIE_SECURE,
