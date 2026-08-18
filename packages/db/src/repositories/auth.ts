@@ -1,4 +1,4 @@
-import { and, eq, lte, sql } from "drizzle-orm";
+import { and, eq, lt, lte, sql } from "drizzle-orm";
 import type { Db } from "../client.js";
 import { rateLimits, sessions } from "../schema.js";
 
@@ -93,4 +93,27 @@ export async function bumpRateLimit(
     throw new Error("bumpRateLimit: upsert returned no row");
   }
   return row.count;
+}
+
+/**
+ * Sweeps stale rate-limit rows. Unlike `sessions`, this table has no
+ * `expiresAt` of its own — a row's window closes `windowMs` after
+ * `windowStartedAt`, and `windowMs` is a per-caller config value the table
+ * never stores. So this takes the cutoff directly rather than a duration: the
+ * caller (the daily `session-cleanup` job) computes `now - retention` using a
+ * retention period generous enough to outlive any window in use, and rows
+ * whose window opened before that cutoff are long since irrelevant to any
+ * live rate limit and safe to delete.
+ *
+ * Carried forward from Task 5: `rate_limits` accumulates one row per distinct
+ * key (effectively one per client IP that has ever attempted a login) and,
+ * unlike `sessions`, had no sweep at all — an unbounded table with no upper
+ * bound on distinct keys seen over the app's lifetime.
+ */
+export async function deleteExpiredRateLimits(db: Db, olderThan: Date): Promise<number> {
+  const rows = await db
+    .delete(rateLimits)
+    .where(lt(rateLimits.windowStartedAt, olderThan))
+    .returning({ key: rateLimits.key });
+  return rows.length;
 }

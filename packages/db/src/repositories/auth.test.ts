@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { stopTestDatabase, withTestDatabase } from "../testing/harness.js";
 import {
   bumpRateLimit,
+  deleteExpiredRateLimits,
   deleteExpiredSessions,
   deleteSession,
   insertSession,
@@ -207,6 +208,37 @@ describe("rate limit repository", () => {
       // attempt happened 11 minutes ago.
       const afterWindow = new Date(start.getTime() + 61 * 60 * 1000);
       expect(await bumpRateLimit(db, "ip-d", afterWindow, HOUR)).toBe(1);
+    });
+  });
+
+  it("sweeps only rows whose window started before the cutoff", async () => {
+    await withTestDatabase(async (db) => {
+      const old = new Date("2026-08-16T12:00:00Z");
+      const recent = new Date("2026-08-18T11:00:00Z");
+      await bumpRateLimit(db, "ip-old", old, HOUR);
+      await bumpRateLimit(db, "ip-recent", recent, HOUR);
+
+      const cutoff = new Date("2026-08-18T00:00:00Z");
+      expect(await deleteExpiredRateLimits(db, cutoff)).toBe(1);
+
+      // The swept key is gone: a fresh bump starts back at 1 rather than
+      // continuing the old row's count.
+      expect(await bumpRateLimit(db, "ip-old", recent, HOUR)).toBe(1);
+      // The untouched key kept accumulating from where it left off.
+      expect(await bumpRateLimit(db, "ip-recent", recent, HOUR)).toBe(2);
+    });
+  });
+
+  // A row exactly AT the cutoff must survive — "older than", not
+  // "at or older than". A `lte` instead of `lt` would delete it and this
+  // test would see a fresh count of 1 instead of 2.
+  it("keeps a row whose window started exactly at the cutoff", async () => {
+    await withTestDatabase(async (db) => {
+      const cutoff = new Date("2026-08-18T00:00:00Z");
+      await bumpRateLimit(db, "ip-boundary", cutoff, HOUR);
+
+      expect(await deleteExpiredRateLimits(db, cutoff)).toBe(0);
+      expect(await bumpRateLimit(db, "ip-boundary", cutoff, HOUR)).toBe(2);
     });
   });
 });

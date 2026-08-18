@@ -1,98 +1,13 @@
-import {
-  applyRollupDelta,
-  archiveMissingItems,
-  closeSession,
-  findStaleOpenSessions,
-  openSession,
-  recomputeRollupRange,
-  touchSession,
-  upsertDevice,
-  upsertItems,
-  upsertLibraries,
-  upsertUsers,
-} from "@jfstats/db";
+import { applyRollupDelta, closeSession, findStaleOpenSessions } from "@jfstats/db";
 import { loadEnv } from "@jfstats/shared";
 import { Queue, Worker } from "bullmq";
-import { closeContext, createContext, type AppContext } from "./context.js";
+import { closeContext, createContext } from "./context.js";
+import { handle } from "./scheduler.js";
 import { createShutdownHandler } from "./shutdown.js";
-import { runSessionPoll } from "./sync/applier.js";
 import { reconcileOpenSessions } from "./sync/reconcile.js";
-import { runReferenceSync } from "./sync/reference-sync.js";
+import type { JobName } from "./sync/schedule.js";
 
 const QUEUE_NAME = "jfstats-sync";
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-const ROLLUP_LOOKBACK_DAYS = 7;
-
-export type JobName = "session-poll" | "reference-sync" | "item-sync" | "rollup-recompute";
-
-/**
- * The range the nightly recompute rebuilds: the trailing 7 *whole* UTC days, ending at
- * (and excluding) the current UTC day. The day in progress is deliberately left out —
- * it is still being written incrementally, and rebuilding it from a partial set of
- * sessions would fight the applier rather than correct it.
- *
- * recomputeRollupRange floors `from` down and ceils `to` up to UTC day boundaries, so
- * both bounds must already sit on a day boundary here — otherwise floor+ceil silently
- * add an extra day to the window regardless of what time the cron fires.
- *
- * Takes `now` rather than reading the clock itself, matching every other
- * time-dependent function on this path (diffSessions, runSessionPoll,
- * reconcileOpenSessions, generateSeedData) and making the boundary behavior testable.
- */
-export function rollupWindow(now: number): { from: Date; to: Date } {
-  const to = new Date(new Date(now).toISOString().slice(0, 10));
-  const from = new Date(to.getTime() - ROLLUP_LOOKBACK_DAYS * DAY_MS);
-  return { from, to };
-}
-
-export async function handle(context: AppContext, name: JobName, now = Date.now): Promise<void> {
-  switch (name) {
-    case "session-poll":
-      await runSessionPoll({
-        db: context.db,
-        jellyfin: context.jellyfin,
-        snapshots: context.snapshots,
-        completionThreshold: context.env.COMPLETION_THRESHOLD,
-        maxWatchDeltaMs: context.env.maxWatchDeltaMs,
-        openSession,
-        touchSession,
-        closeSession,
-        applyRollupDelta,
-        upsertDevice,
-      });
-      return;
-
-    case "reference-sync":
-    case "item-sync":
-      await runReferenceSync({
-        db: context.db,
-        jellyfin: context.jellyfin,
-        upsertUsers,
-        upsertLibraries,
-        upsertItems,
-        archiveMissingItems,
-        includeItems: name === "item-sync",
-      });
-      return;
-
-    case "rollup-recompute": {
-      const { from, to } = rollupWindow(now());
-      await recomputeRollupRange(context.db, from, to);
-      return;
-    }
-
-    default: {
-      // Exhaustiveness guard: if JobName ever gains a variant without a case here,
-      // this assignment fails to compile. Without it, an unrecognized job name would
-      // fall through, handle() would return undefined, and BullMQ would mark the job
-      // completed successfully having done nothing — worse than a loud failure,
-      // because it never reaches the worker's "failed" handler.
-      const _exhaustive: never = name;
-      throw new Error(`Unhandled job name: ${String(_exhaustive)}`);
-    }
-  }
-}
 
 async function main(): Promise<void> {
   const context = createContext(loadEnv());
