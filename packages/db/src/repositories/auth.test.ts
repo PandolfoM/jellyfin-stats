@@ -30,6 +30,26 @@ describe("session repository", () => {
     });
   });
 
+  // isAdmin: true is the only value every other fixture in this file uses. Without
+  // this case, a projection bug (wrong column) or a hard-coded `true` in the
+  // RETURNING clause would pass the whole file.
+  it("round-trips a non-admin session with isAdmin false", async () => {
+    await withTestDatabase(async (db) => {
+      const now = new Date("2026-08-18T12:00:00Z");
+      await insertSession(db, {
+        id: "sess-nonadmin",
+        userId: "user-5",
+        userName: "hopper",
+        isAdmin: false,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + HOUR),
+      });
+
+      const found = await selectLiveSession(db, "sess-nonadmin", now, new Date(now.getTime() + HOUR));
+      expect(found).toEqual({ userId: "user-5", userName: "hopper", isAdmin: false, createdAt: now });
+    });
+  });
+
   it("returns null for an unknown id", async () => {
     await withTestDatabase(async (db) => {
       const now = new Date("2026-08-18T12:00:00Z");
@@ -59,7 +79,9 @@ describe("session repository", () => {
   });
 
   // Sliding expiry: reading at T pushes the deadline out, so a read at
-  // T + 90min still succeeds even though the original 1h deadline has passed.
+  // T + 89min still succeeds even though the original 1h deadline has passed.
+  // (89, not 90: the new deadline is exactly midway + HOUR = issued + 90min, and
+  // expiry is exclusive at the boundary — see the pinning test below for that edge.)
   it("pushes expiry forward on read, so an active session outlives its original deadline", async () => {
     await withTestDatabase(async (db) => {
       const issued = new Date("2026-08-18T12:00:00Z");
@@ -75,10 +97,38 @@ describe("session repository", () => {
       const midway = new Date(issued.getTime() + 30 * 60 * 1000);
       await selectLiveSession(db, "sess-active", midway, new Date(midway.getTime() + HOUR));
 
-      const past = new Date(issued.getTime() + 90 * 60 * 1000);
+      const past = new Date(issued.getTime() + 89 * 60 * 1000);
       expect(
         await selectLiveSession(db, "sess-active", past, new Date(past.getTime() + HOUR)),
       ).not.toBeNull();
+    });
+  });
+
+  // Pins the written expiresAt to nextExpiresAt exactly, not to "something later
+  // than before". An implementation that ignored nextExpiresAt and instead wrote a
+  // far-future value (now + 10 years, or 'infinity') would still pass every other
+  // test in this file, including the one above.
+  it("writes exactly nextExpiresAt, not merely some later value", async () => {
+    await withTestDatabase(async (db) => {
+      const issued = new Date("2026-08-18T12:00:00Z");
+      await insertSession(db, {
+        id: "sess-pinned",
+        userId: "user-6",
+        userName: "ritchie",
+        isAdmin: true,
+        createdAt: issued,
+        expiresAt: new Date(issued.getTime() + HOUR),
+      });
+
+      const midway = new Date(issued.getTime() + 30 * 60 * 1000);
+      const nextExpiresAt = new Date(midway.getTime() + HOUR);
+      await selectLiveSession(db, "sess-pinned", midway, nextExpiresAt);
+
+      // One millisecond past the deadline just written must already be expired.
+      const justAfter = new Date(nextExpiresAt.getTime() + 1);
+      expect(
+        await selectLiveSession(db, "sess-pinned", justAfter, new Date(justAfter.getTime() + HOUR)),
+      ).toBeNull();
     });
   });
 

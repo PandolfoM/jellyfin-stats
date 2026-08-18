@@ -20,11 +20,6 @@ export async function insertSession(db: Db, row: SessionRow): Promise<void> {
  * "exists AND not expired" and the RETURNING clause hands back the row it just
  * refreshed. A read followed by a separate update would let a session expire
  * between the two.
- *
- * The comparison is inclusive (`>=`, not `>`): a prior read can set expiresAt to
- * exactly `now + ttl`, and a subsequent read landing on that exact instant must
- * still see a live session — a strict `>` would treat the row as already expired
- * at the boundary it just wrote.
  */
 export async function selectLiveSession(
   db: Db,
@@ -35,7 +30,7 @@ export async function selectLiveSession(
   const rows = await db
     .update(sessions)
     .set({ expiresAt: nextExpiresAt })
-    .where(and(eq(sessions.id, id), sql`${sessions.expiresAt} >= ${now}`))
+    .where(and(eq(sessions.id, id), sql`${sessions.expiresAt} > ${now}`))
     .returning({
       userId: sessions.userId,
       userName: sessions.userName,
