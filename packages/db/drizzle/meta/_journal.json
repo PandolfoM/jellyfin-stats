@@ -15,6 +15,13 @@
       "when": 1786984232445,
       "tag": "0001_glossy_mandroid",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787087906375,
+      "tag": "0002_flaky_sunfire",
+      "breakpoints": true
     }
   ]
 }

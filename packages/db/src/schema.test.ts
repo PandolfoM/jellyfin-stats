@@ -11,17 +11,20 @@ describe("schema", () => {
       const result = await db.execute<{ table_name: string }>(
         sql`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`,
       );
-      const tables = result.rows.map((row) => row.table_name);
+      const tables = result.rows.map((row) => row.table_name).sort();
 
       expect(tables).toEqual(
-        expect.arrayContaining([
-          "jellyfin_users",
-          "libraries",
-          "items",
+        [
           "devices",
-          "playback_sessions",
+          "items",
+          "jellyfin_users",
+          "job_runs",
+          "libraries",
           "playback_rollup_daily",
-        ]),
+          "playback_sessions",
+          "rate_limits",
+          "sessions",
+        ].sort(),
       );
     });
   });
