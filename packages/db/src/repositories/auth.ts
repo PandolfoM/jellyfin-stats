@@ -82,5 +82,15 @@ export async function bumpRateLimit(
     })
     .returning({ count: rateLimits.count });
 
-  return rows[0]?.count ?? 1;
+  const row = rows[0];
+  if (row === undefined) {
+    // Unreachable today — INSERT ... ON CONFLICT DO UPDATE ... RETURNING always
+    // returns exactly one row — but silently defaulting to "1 attempt used"
+    // here would be a fail-OPEN result: it reads as "just started", which is
+    // under every real limit. Throwing lets the caller's fail-closed catch
+    // (apps/server/src/api/rate-limit.ts) turn this into a rejected attempt
+    // instead, keeping the fail-closed guarantee total rather than partial.
+    throw new Error("bumpRateLimit: upsert returned no row");
+  }
+  return row.count;
 }

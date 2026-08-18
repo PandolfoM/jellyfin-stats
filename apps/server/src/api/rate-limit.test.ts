@@ -53,6 +53,13 @@ describe("rate limiter", () => {
       await limiter.check("198.51.100.11");
       expect(await limiter.check("198.51.100.11")).toMatchObject({ allowed: false });
 
+      // Still inside the 42-SECOND window (only 41 seconds have passed) — pins
+      // the seconds-to-milliseconds conversion. Without it, `windowSeconds: 42`
+      // is read as a 42-MILLISECOND window, which this advance would already be
+      // well past, and the assertion below would wrongly see the limit reset.
+      vi.setSystemTime(new Date("2026-08-18T12:00:00Z").getTime() + 41_000);
+      expect(await limiter.check("198.51.100.11")).toMatchObject({ allowed: false });
+
       vi.setSystemTime(new Date("2026-08-18T12:00:00Z").getTime() + 43_000);
 
       expect(await limiter.check("198.51.100.11")).toEqual({ allowed: true, remaining: 1 });
