@@ -112,7 +112,17 @@ export async function handle(context: AppContext, name: JobName, now = Date.now)
   }
 }
 
-function buildSchedules(env: AppEnv): Record<JobName, Schedule> {
+/**
+ * The concrete `JobName -> Schedule` mapping used in production. Exported
+ * (rather than kept private) so scheduler.test.ts can assert the mapping
+ * directly — every job name present, the two interval jobs reading their
+ * millisecond values from env, and the three daily jobs landing on their
+ * intended, mutually distinct hour/minute. Without that test this mapping
+ * was reachable only through the untested `startScheduler`, so a transposed
+ * hour or minute (e.g. rollup-recompute accidentally sharing item-sync's
+ * 3:00 slot) would compile and pass the full suite undetected.
+ */
+export function buildSchedules(env: AppEnv): Record<JobName, Schedule> {
   return {
     "session-poll": { type: "interval", everyMs: env.SESSION_POLL_INTERVAL_MS },
     "reference-sync": { type: "interval", everyMs: env.REFERENCE_SYNC_INTERVAL_MS },
@@ -177,12 +187,19 @@ export interface StartSchedulerOptions {
   now?: () => number;
   runJob?: (name: JobName) => Promise<void>;
   tickMs?: number;
+  /** Overrides the `job_runs` read. Exists so scheduler.test.ts can drive the
+   * timer and `stop()` without a real database — production always uses the
+   * default, which reads `context.db`. */
+  readRuns?: () => Promise<Map<string, Date>>;
+  /** Overrides the `job_runs` write, for the same reason as `readRuns`. */
+  writeRun?: (name: JobName, at: Date) => Promise<void>;
 }
 
 /**
  * Replaces BullMQ entirely: a single `setInterval` that polls `job_runs` and
  * dispatches whatever is due through `handle`. `options` exists so tests can
- * drive `runDueJobs` directly instead of going through this timer — see
+ * drive `runDueJobs` directly instead of going through this timer, or drive
+ * the timer itself with `readRuns`/`writeRun`/`runJob` swapped out — see
  * scheduler.test.ts.
  */
 export function startScheduler(
@@ -192,18 +209,20 @@ export function startScheduler(
   const now = options.now ?? Date.now;
   const runJob = options.runJob ?? ((name: JobName) => handle(context, name, now));
   const tickMs = options.tickMs ?? context.env.SESSION_POLL_INTERVAL_MS;
+  const readRuns = options.readRuns ?? (() => readJobRuns(context.db));
+  const writeRun = options.writeRun ?? ((name: JobName, at: Date) => writeJobRun(context.db, name, at));
 
   const deps: SchedulerDeps = {
     schedules: buildSchedules(context.env),
     runJob,
-    writeRun: (name, at) => writeJobRun(context.db, name, at),
+    writeRun,
     logger: context.logger,
     inFlight: new Map(),
   };
 
   const tick = async (): Promise<void> => {
     try {
-      const runs = await readJobRuns(context.db);
+      const runs = await readRuns();
       await runDueJobs(deps, runs, now());
     } catch (error) {
       context.logger.error({ err: error }, "scheduler tick failed");

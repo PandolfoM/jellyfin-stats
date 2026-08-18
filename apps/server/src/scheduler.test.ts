@@ -1,8 +1,16 @@
 import { bumpRateLimit, insertSession, selectLiveSession } from "@jfstats/db";
 import { stopTestDatabase, withTestDatabase } from "@jfstats/db/testing";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import type { AppEnv } from "@jfstats/shared";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppContext } from "./context.js";
-import { handle, rollupWindow, runDueJobs, type SchedulerDeps } from "./scheduler.js";
+import {
+  buildSchedules,
+  handle,
+  rollupWindow,
+  runDueJobs,
+  startScheduler,
+  type SchedulerDeps,
+} from "./scheduler.js";
 import { JOB_NAMES, type JobName, type Schedule } from "./sync/schedule.js";
 
 afterAll(stopTestDatabase);
@@ -289,5 +297,131 @@ describe("runDueJobs", () => {
     expect(writeRun).toHaveBeenCalledTimes(1);
     expect(writeRun).toHaveBeenCalledWith(TARGET, new Date(FIXED_NOW));
     expect(logger.error).not.toHaveBeenCalled();
+  });
+});
+
+// --- buildSchedules ---------------------------------------------------------
+//
+// This mapping was previously reachable only through the untested
+// startScheduler, so a transposed hour/minute between two daily jobs would
+// have compiled and passed the full suite silently.
+
+describe("buildSchedules", () => {
+  const env = {
+    SESSION_POLL_INTERVAL_MS: 5000,
+    REFERENCE_SYNC_INTERVAL_MS: 900_000,
+  } as unknown as AppEnv;
+
+  it("covers every job name exactly once", () => {
+    const schedules = buildSchedules(env);
+    expect(Object.keys(schedules).sort()).toEqual([...JOB_NAMES].sort());
+  });
+
+  it("wires the two interval jobs to their env-configured millisecond values", () => {
+    const schedules = buildSchedules(env);
+    expect(schedules["session-poll"]).toEqual({ type: "interval", everyMs: 5000 });
+    expect(schedules["reference-sync"]).toEqual({ type: "interval", everyMs: 900_000 });
+  });
+
+  it("wires the three daily jobs to their intended, mutually distinct times", () => {
+    const schedules = buildSchedules(env);
+    expect(schedules["item-sync"]).toEqual({ type: "daily", hour: 3, minute: 0 });
+    expect(schedules["rollup-recompute"]).toEqual({ type: "daily", hour: 3, minute: 30 });
+    expect(schedules["session-cleanup"]).toEqual({ type: "daily", hour: 4, minute: 0 });
+
+    // Distinct, not merely individually correct: two daily jobs silently
+    // sharing a slot is a bug isDue's own tests cannot see, because they
+    // never look at this JobName -> Schedule mapping at all.
+    const dailyNames = ["item-sync", "rollup-recompute", "session-cleanup"] as const;
+    const dailyTimes = dailyNames.map((name) => {
+      const schedule = schedules[name];
+      if (schedule.type !== "daily") throw new Error(`expected ${name} to be a daily schedule`);
+      return `${schedule.hour}:${schedule.minute}`;
+    });
+    expect(new Set(dailyTimes).size).toBe(dailyTimes.length);
+  });
+});
+
+// --- startScheduler ----------------------------------------------------------
+//
+// readRuns/writeRun/runJob are all injected, so this drives the real timer
+// and stop() with fake timers and no database at all.
+
+describe("startScheduler", () => {
+  const FAKE_ENV = {
+    SESSION_POLL_INTERVAL_MS: 5000,
+    REFERENCE_SYNC_INTERVAL_MS: 900_000,
+  } as unknown as AppEnv;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-18T12:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // Every job but the target gets a last-run timestamp 100 years in the
+  // future, which is "not due" for a daily job regardless of the host
+  // process's local timezone (unlike a lastRunAt near "now", whose due-ness
+  // for a daily schedule depends on local wall-clock fields) and for an
+  // interval job regardless of its configured interval.
+  function onlyDueUnderRealSchedules(due: JobName, now: number): Map<string, Date> {
+    const farFuture = new Date(now + 100 * 365 * DAY_MS);
+    const runs = new Map<string, Date>();
+    for (const name of JOB_NAMES) {
+      if (name !== due) runs.set(name, farFuture);
+    }
+    return runs;
+  }
+
+  it("stops dispatching once stop() is called, and stop() waits for in-flight work before resolving", async () => {
+    let resolveJob: (() => void) | undefined;
+    const pending = new Promise<void>((resolve) => {
+      resolveJob = resolve;
+    });
+    // Only the target job ever blocks; every other job resolves immediately
+    // so it never occupies the in-flight guard across ticks.
+    const runJob = vi.fn((name: JobName) => (name === TARGET ? pending : Promise.resolve()));
+    const writeRun = vi.fn().mockResolvedValue(undefined);
+    const readRuns = vi.fn().mockResolvedValue(onlyDueUnderRealSchedules(TARGET, Date.now()));
+
+    const context = {
+      env: FAKE_ENV,
+      logger: { error: vi.fn() },
+    } as unknown as AppContext;
+
+    const scheduler = startScheduler(context, { runJob, readRuns, writeRun, tickMs: 1000 });
+
+    // First tick fires and dispatches the target job, which then blocks.
+    await vi.advanceTimersByTimeAsync(1000);
+    const readRunsCallsBeforeStop = readRuns.mock.calls.length;
+    expect(readRunsCallsBeforeStop).toBe(1);
+    expect(runJob.mock.calls.filter(([name]) => name === TARGET).length).toBe(1);
+
+    let stopped = false;
+    const stopPromise = scheduler.stop().then(() => {
+      stopped = true;
+    });
+
+    // Five more tick intervals pass. readRuns is called unconditionally at
+    // the top of every tick, before the in-flight guard is even consulted —
+    // so, unlike a runJob call count, it still increases here if the timer
+    // were merely left running while the (still in-flight, still guarded)
+    // target job blocks stop() from resolving. Only clearInterval actually
+    // stops it from ticking.
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(readRuns.mock.calls.length).toBe(readRunsCallsBeforeStop);
+    // stop() must not resolve while the job it dispatched is still pending —
+    // draining in-flight work before returning is the whole point of stop()
+    // awaiting `inFlight`, not merely clearing the interval.
+    expect(stopped).toBe(false);
+
+    resolveJob?.();
+    await stopPromise;
+    expect(stopped).toBe(true);
+    // And no tick sneaked in during the drain either.
+    expect(readRuns.mock.calls.length).toBe(readRunsCallsBeforeStop);
   });
 });
