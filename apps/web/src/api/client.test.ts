@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { api } from "./client";
 import { ApiError, unwrap } from "./client";
+import * as unauthorized from "./unauthorized";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -39,6 +40,42 @@ describe("unwrap", () => {
     await expect(unwrap(new Response("not json", { status: 200 }))).rejects.not.toMatchObject({
       status: 401,
     });
+  });
+});
+
+describe("unwrap notifying the shared unauthorized listener", () => {
+  // Spying on the real module (not a full `vi.mock` factory) so `unwrap`'s
+  // own import of `notifyUnauthorized` and this test's assertion resolve to
+  // the exact same function reference — a `vi.mock` factory returning a
+  // fresh `vi.fn()` would still pass a naive call-count check even if
+  // `unwrap` imported a different notifier than the one being asserted on.
+  // Re-created in `beforeEach` rather than once for the whole describe block
+  // because the file's top-level `afterEach(() => vi.restoreAllMocks())`
+  // reverts the module's `notifyUnauthorized` back to its real
+  // implementation after every test — a spy built once outside `beforeEach`
+  // would only ever observe the first test's calls.
+  let notifySpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    notifySpy = vi.spyOn(unauthorized, "notifyUnauthorized");
+  });
+
+  it("notifies on a 401, so SessionProvider can treat it as a logout", async () => {
+    await expect(unwrap(new Response("{}", { status: 401 }))).rejects.toBeInstanceOf(ApiError);
+
+    expect(notifySpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not notify on a 500 — a server fault is not a logout", async () => {
+    await expect(unwrap(new Response("{}", { status: 500 }))).rejects.toBeInstanceOf(ApiError);
+
+    expect(notifySpy).not.toHaveBeenCalled();
+  });
+
+  it("does not notify on a 2xx response", async () => {
+    await unwrap(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+    expect(notifySpy).not.toHaveBeenCalled();
   });
 });
 

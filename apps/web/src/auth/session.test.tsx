@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { notifyUnauthorized } from "../api/unauthorized";
 import { SessionProvider, useSession } from "./session";
 
 function Probe() {
@@ -135,6 +136,30 @@ describe("SessionProvider", () => {
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
 
     await userEvent.click(screen.getByText("logout"));
+
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"));
+  });
+
+  it("becomes anonymous when a protected route's query reports a 401 via the shared unauthorized notifier", async () => {
+    // Nothing here calls /api/auth/me again — this proves the transition
+    // comes from `notifyUnauthorized` alone, the same signal `unwrap` sends
+    // for a 401 on a stats/history/etc. query, not from a fresh session
+    // resolution. A SessionProvider that only reacted to `resolveSession`
+    // (and ignored the shared notifier) would leave `status` stuck on
+    // "authenticated" here.
+    mockFetch(() =>
+      new Response(JSON.stringify({ userId: "u-1", userName: "admin", isAdmin: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    renderProbe();
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
+
+    act(() => {
+      notifyUnauthorized();
+    });
 
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("anonymous"));
   });

@@ -1,5 +1,6 @@
 import { hc } from "hono/client";
 import type { AppType } from "../../../server/src/api/app.js";
+import { notifyUnauthorized } from "./unauthorized";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -21,6 +22,12 @@ export const api = hc<AppType>("/", {
 
 export async function unwrap<T>(response: Response): Promise<T> {
   if (!response.ok) {
+    // A 401 from *any* route (not just /api/auth/me) means the session
+    // expired or was revoked server-side after the page loaded — every
+    // caller of `unwrap` gets this notification for free rather than each
+    // route having to check `err.status === 401` itself. See unauthorized.ts
+    // for who listens and what they do with it.
+    if (response.status === 401) notifyUnauthorized();
     throw new ApiError(response.status, `Request failed with ${response.status}`);
   }
 

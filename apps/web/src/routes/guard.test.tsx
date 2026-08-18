@@ -8,6 +8,7 @@
 // never on whether the gate merely *stopped short* of rendering the wrong
 // thing, since the ordinary "loading" default already does that on the
 // first tick regardless of what the gate does next.
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -32,12 +33,49 @@ function mockAuthMe(respond: () => Response | Promise<Response>) {
   );
 }
 
+/**
+ * Same as `mockAuthMe`, but also answers the four queries the Overview
+ * route (Task 7) fires once it actually renders — only the "authenticated"
+ * case below reaches that route, but since the gate itself doesn't know or
+ * care what Overview does with its content, this file's job is still just
+ * "does the gate render the right thing", not "does Overview render
+ * correctly" (index.test.tsx owns that).
+ */
+function mockAuthMeAndOverviewQueries(respond: () => Response | Promise<Response>) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.includes("/api/auth/me")) return respond();
+      if (url.includes("/api/stats/overview")) {
+        return new Response(JSON.stringify({ plays: 0, watchMs: 0, activeUsers: 0, activeItems: 0 }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("/api/stats/series") || url.includes("/api/stats/top-items")) {
+        return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.includes("/api/history")) {
+        return new Response(JSON.stringify({ rows: [], total: 0 }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`guard.test.tsx did not expect a fetch to ${url}`);
+    }),
+  );
+}
+
 function renderAt(initialPath: string) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createAppRouter(createMemoryHistory({ initialEntries: [initialPath] }));
   render(
-    <SessionProvider>
-      <RouterProvider router={router} />
-    </SessionProvider>,
+    <QueryClientProvider client={queryClient}>
+      <SessionProvider>
+        <RouterProvider router={router} />
+      </SessionProvider>
+    </QueryClientProvider>,
   );
   return router;
 }
@@ -65,7 +103,7 @@ describe("protected-route gate", () => {
   });
 
   it("renders the protected route for an authenticated session", async () => {
-    mockAuthMe(
+    mockAuthMeAndOverviewQueries(
       () => new Response(AUTHENTICATED_BODY, { status: 200, headers: { "content-type": "application/json" } }),
     );
 

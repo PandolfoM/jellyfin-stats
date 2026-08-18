@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import { ApiError, api, unwrap } from "../api/client";
+import { subscribeUnauthorized } from "../api/unauthorized";
 
 export interface SessionUser {
   userId: string;
@@ -142,6 +143,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, []);
+
+  // A 401 from any *other* protected route (stats, history, images, live —
+  // not just /api/auth/me above) means the session expired or was revoked
+  // after this page already loaded. Treating it identically to the bootstrap
+  // 401 — flip to "anonymous", never "error" — is what lets the
+  // protected-route gate in routes/__root.tsx redirect to /login on its own,
+  // instead of every data-fetching route needing its own 401 check to avoid
+  // rendering an error card for what is actually a login prompt.
+  useEffect(() => subscribeUnauthorized(() => setState(ANONYMOUS_STATE)), []);
 
   // The password is never stored — it lives only as a parameter here, passed
   // straight into the request body, never assigned to state or a ref.
