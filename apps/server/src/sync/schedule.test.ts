@@ -1,9 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { isDue, type Schedule } from "./schedule.js";
 
-const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
-
 // Pinned, and pinned to a NEGATIVE-offset zone specifically. With TZ unset this
 // file passes on a UTC runner even if `daily` were implemented with Date.UTC,
 // because local and UTC would agree — the bug this pins only appears off UTC.
@@ -70,5 +67,20 @@ describe("isDue — daily, in local time", () => {
     const now = new Date("2026-08-18T05:00:00Z").getTime();
     const ranYesterdayLocal = new Date("2026-08-17T03:00:00-04:00").getTime();
     expect(isDue(daily3am, ranYesterdayLocal, now)).toBe(false);
+  });
+
+  // DST boundary test: spring-forward. 2026-03-08 at 02:00 EST, clocks spring
+  // forward to 03:00 EDT. The catch-up branch must compute "yesterday's 3am"
+  // using calendar arithmetic (new Date(y, m, d-1, h, min)), not fixed-millisecond
+  // subtraction. With fixed-24h, the target lands at UTC 07:00 on Mar 7
+  // (≈ 02:00 EST), but it should be UTC 08:00 (≈ 03:00 EST).
+  it("catches up correctly when spanning a spring-forward DST transition", () => {
+    // now = Mar 8 01:30 EST, before spring-forward, before 3 AM target.
+    const now = new Date("2026-03-08T01:30:00-05:00").getTime();
+    // lastRunAt = Mar 7 02:30 EST: between buggy target (02:00) and correct (03:00).
+    // With calendar arithmetic this is before the target, so isDue = true.
+    // With fixed-24h subtraction this is after the target, so isDue = false.
+    const lastRunAt = new Date("2026-03-07T02:30:00-05:00").getTime();
+    expect(isDue(daily3am, lastRunAt, now)).toBe(true);
   });
 });

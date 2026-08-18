@@ -21,11 +21,15 @@ export type JobName = (typeof JOB_NAMES)[number];
  * the target with Date.UTC would move nightly maintenance to 23:00 for an
  * Eastern deployment — peak viewing rather than the quiet hours it was chosen
  * for. The Date constructor used here reads local fields.
+ *
+ * The fallback to "yesterday's target" uses calendar arithmetic
+ * (new Date(y, m, d-1, h, min)) rather than fixed-millisecond subtraction,
+ * because days are 23 or 25 hours long across DST transitions.
  */
 function mostRecentDailyTarget(now: number, hour: number, minute: number): number {
   const d = new Date(now);
   const today = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, minute, 0, 0).getTime();
-  return today <= now ? today : today - 24 * 60 * 60 * 1000;
+  return today <= now ? today : new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1, hour, minute, 0, 0).getTime();
 }
 
 /**
