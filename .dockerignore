@@ -11,3 +11,4 @@ docs
 playwright-report
 test-results
 **/*.test.ts
+**/*.test.tsx

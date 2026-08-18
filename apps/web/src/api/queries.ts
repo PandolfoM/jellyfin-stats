@@ -50,11 +50,17 @@ export interface HistoryQueryOptions {
 }
 
 /**
- * `overview`/`series`/`users`/`libraries` take only a range, but `top-items`
+ * `overview`/`series`/`users`/`libraries` take only a range, and `top-items`
  * and `history` fold their extra filters into the same `[group, name, ...]`
- * key shape — every branch below still starts with a literal tuple prefix
- * that no other factory shares, so no two factories can collide no matter
- * what they append after it.
+ * key shape. `users` and `userDetail` do share a literal two-element prefix
+ * (`["stats", "users", ...]`) — that is not a collision, since the two keys
+ * differ in length and TanStack Query hashes the whole key, not just a
+ * prefix, so a cache lookup for one never matches an entry for the other.
+ * It does matter for *partial*-key invalidation, though:
+ * `invalidateQueries({ queryKey: ["stats", "users"] })` matches both, since
+ * TanStack treats a shorter key as a prefix. Invalidate `queryKeys.users(...)`
+ * or `queryKeys.userDetail(...)` directly when only one of the two should be
+ * affected.
  */
 const queryKeys = {
   overview: (range: DateRange) => ["stats", "overview", range] as const,

@@ -8,12 +8,16 @@
 // data was handled correctly). The mock gives the container a fixed,
 // nonzero size so Recharts actually lays out the chart's SVG.
 import { render, screen } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SeriesResponse } from "../../api/queries";
 import { type DayPoint, WatchTimeChart } from "./WatchTimeChart";
 
-beforeAll(() => {
+// `beforeEach`, not `beforeAll`: the root vitest.config.ts sets
+// `unstubGlobals: true`, which unstubs every `vi.stubGlobal` before each
+// test runs. A one-time `beforeAll` stub would apply to the first test only
+// and silently vanish for the rest of this file's tests.
+beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, "offsetWidth", { configurable: true, value: 600 });
   Object.defineProperty(HTMLElement.prototype, "offsetHeight", { configurable: true, value: 280 });
   HTMLElement.prototype.getBoundingClientRect = () =>

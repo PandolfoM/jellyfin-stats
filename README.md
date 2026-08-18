@@ -33,22 +33,31 @@ cp .env.example .env
 
 `.env` is gitignored. Never commit real credentials.
 
+This section sets up a **development** database only — Postgres and Redis
+running under Docker, with the schema pushed from the host. It does not start
+the API, the worker, or a container running this app's own code; that's
+[Running the app](#running-the-app), right after this. (Deploying instead of
+developing? Skip ahead to that section's `docker compose up -d`, which brings
+up Postgres, Redis, the worker, and the API together, in containers, in one
+step — running it now, on top of the containers below, would start two
+workers polling the same Jellyfin server into the same database.)
+
 ```bash
 pnpm install
-docker compose up -d
+docker compose up -d postgres redis
 pnpm --filter @jfstats/db migrate:push
-pnpm --filter @jfstats/server dev:worker
 ```
 
 Compose publishes Postgres and Redis on their conventional host ports
 (`5432`/`6379`). `POSTGRES_PORT`/`REDIS_PORT` control only what Docker
 publishes on the host — set one when something on your machine already
 occupies the conventional port. Everything that connects to Postgres or
-Redis (`dev:worker`, `migrate:push`, `seed`) runs on the host, outside
-Docker, and never reads `POSTGRES_PORT`/`REDIS_PORT` — it connects only
-through `DATABASE_URL`/`REDIS_URL`. So the port inside those URLs must be
-changed to match, in the same edit, or the app keeps trying the old port
-and fails to connect. For example, if `6379` is already taken:
+Redis in this dev setup (`dev:worker`, `dev:api`, `migrate:push`, `seed`)
+runs on the host, outside Docker, and never reads
+`POSTGRES_PORT`/`REDIS_PORT` — it connects only through
+`DATABASE_URL`/`REDIS_URL`. So the port inside those URLs must be changed to
+match, in the same edit, or the app keeps trying the old port and fails to
+connect. For example, if `6379` is already taken:
 
 ```bash
 # .env
@@ -105,9 +114,9 @@ developing against it, and one command for running it like a deployed service.
 
 ### Development (two terminals)
 
-Postgres and Redis run under Docker (`docker compose up -d`, per Setup above); the
-API and the web UI's Vite dev server both run on the host, in two separate
-terminals:
+Postgres and Redis run under Docker (`docker compose up -d postgres redis`, per
+Setup above); the API and the web UI's Vite dev server both run on the host, in
+two separate terminals:
 
 ```bash
 # terminal 1 — the HTTP API, listening on PORT (default 3000)
@@ -139,10 +148,12 @@ docker compose up -d
 This builds and runs everything from the one `Dockerfile`: Postgres, Redis, a
 one-shot `migrate` service that applies schema migrations and exits, the sync
 worker, and the API — which also serves the built web UI, so the whole dashboard
-is one origin, `http://localhost:3000` by default (`PORT` in `.env` changes it;
-`docker-compose.yml` publishes whatever `PORT` is set to). There is no separate
-web server or build step to run by hand; `docker compose build` produces the SPA
-as part of the API image.
+is one origin, `http://localhost:3000` by default. Set `PORT` in `.env` to change
+it: `docker-compose.yml` passes that value straight through to the container's
+own listener and publishes that same port on the host, so the two always agree —
+no separate host-only override is needed the way `POSTGRES_PORT`/`REDIS_PORT`
+are. There is no separate web server or build step to run by hand; `docker
+compose build` produces the SPA as part of the API image.
 
 **`JELLYFIN_URL` must be reachable from inside a container, not just from your
 host.** A common setup runs Jellyfin on the same machine as this stack, with

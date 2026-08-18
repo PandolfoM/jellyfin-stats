@@ -66,8 +66,6 @@ function mapLoginStatus(status: number): LoginErrorCode {
 interface SessionState {
   status: SessionStatus;
   user: SessionUser | null;
-  /** Set only in the "error" state, so the caller can show what went wrong. */
-  error: string | null;
 }
 
 export interface SessionContextValue extends SessionState {
@@ -77,8 +75,8 @@ export interface SessionContextValue extends SessionState {
 
 const SessionContext = createContext<SessionContextValue | null>(null);
 
-const LOADING_STATE: SessionState = { status: "loading", user: null, error: null };
-const ANONYMOUS_STATE: SessionState = { status: "anonymous", user: null, error: null };
+const LOADING_STATE: SessionState = { status: "loading", user: null };
+const ANONYMOUS_STATE: SessionState = { status: "anonymous", user: null };
 
 /**
  * Resolves the current session from `GET /api/auth/me`, the single source of
@@ -94,16 +92,12 @@ async function resolveSession(): Promise<SessionState> {
     // state, leaving the caller stuck on "loading" forever.
     const response = await api.api.auth.me.$get();
     const user = await unwrap<SessionUser>(response);
-    return { status: "authenticated", user, error: null };
+    return { status: "authenticated", user };
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       return ANONYMOUS_STATE;
     }
-    return {
-      status: "error",
-      user: null,
-      error: err instanceof Error ? err.message : "Could not resolve the current session.",
-    };
+    return { status: "error", user: null };
   }
 }
 
@@ -170,11 +164,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   //     `<img src="/api/images/items/...">`. An `<img>` load never goes
   //     through `unwrap` — a 401 there degrades to PosterImage's own
   //     broken-image placeholder, not a redirect.
-  //   - Nothing under apps/web/src uses `EventSource` yet, but when a
-  //     server-sent-events route (the Live screen) is built, its connection
-  //     will not go through `unwrap` either — SSE has no `Response` for
-  //     `unwrap` to inspect. A 401 on an SSE handshake needs its own
-  //     explicit handling in that route; this subscription will not save it.
+  //   - The Live screen's SSE connection (api/useLiveSessions.ts) does not
+  //     go through `unwrap` either — `EventSource` has no `Response` for
+  //     `unwrap` to inspect, and exposes no status code on its own `error`
+  //     event. That hook handles the 401 case itself: on every `error` it
+  //     probes `GET /api/auth/me` through `unwrap`, which does land back on
+  //     this same subscription via `notifyUnauthorized` once the probe finds
+  //     a 401. See that hook's doc comment for the full mechanism.
   useEffect(() => subscribeUnauthorized(() => setState(ANONYMOUS_STATE)), []);
 
   // The password is never stored — it lives only as a parameter here, passed

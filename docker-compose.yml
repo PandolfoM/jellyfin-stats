@@ -38,13 +38,24 @@ services:
       retries: 10
 
   # DATABASE_URL and REDIS_URL are re-pointed at the compose service names
-  # for all three app services below, the same way ${PORT:-3000} above picks
-  # only the host port: .env's DATABASE_URL/REDIS_URL are host-facing values
-  # (postgres/redis publish to localhost there for `tsx` dev run directly on
-  # the host), but a container reaches its sibling containers by service
-  # name over the compose network, not via the host's published ports or
-  # "localhost". Passing .env's values straight through via env_file alone
-  # would leave every container trying to dial its own loopback interface.
+  # for all three app services below: .env's DATABASE_URL/REDIS_URL are
+  # host-facing values (postgres/redis publish to localhost there for `tsx`
+  # dev run directly on the host), but a container reaches its sibling
+  # containers by service name over the compose network, not via the host's
+  # published ports or "localhost". Passing .env's values straight through
+  # via env_file alone would leave every container trying to dial its own
+  # loopback interface.
+  #
+  # PORT needs no such override. Unlike DATABASE_URL/REDIS_URL, it does not
+  # name a network address that differs between host and container — it
+  # names the port the api process itself binds to (packages/shared/src/env.ts,
+  # apps/server/src/api.ts), which is the same number no matter which side of
+  # the container boundary you're asking from. So it flows straight through
+  # env_file, and the api service's `ports:` mapping below uses that same
+  # `${PORT:-3000}` value on both sides of the `:`, instead of hardcoding the
+  # container side to 3000 — hardcoding it there would let the host-side
+  # port move on its own while the container went on listening at 3000,
+  # making the published port dial a container that isn't listening on it.
   migrate:
     build: .
     command: ["node_modules/.bin/tsx", "apps/server/src/migrate.ts"]
@@ -64,7 +75,7 @@ services:
       DATABASE_URL: *database-url
       REDIS_URL: *redis-url
     ports:
-      - "${PORT:-3000}:3000"
+      - "${PORT:-3000}:${PORT:-3000}"
     depends_on:
       postgres:
         condition: service_healthy
