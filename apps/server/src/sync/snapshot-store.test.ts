@@ -44,6 +44,14 @@ describe("snapshot store", () => {
     expect(seen[0]?.[0]?.sessionId).toBe("s1");
   });
 
+  it("returns an empty array from loadLive before anything has been published", async () => {
+    // Nothing else exercises loadLive() pre-publish: every other test calls it
+    // only after a publish. If `live` were ever misinitialized to something
+    // other than [], a freshly-connecting dashboard would render whatever that
+    // was instead of nothing, before the first poll ever ran.
+    expect(await createSnapshotStore().loadLive()).toEqual([]);
+  });
+
   // The reason loadLive() exists. A client attaching after the publish gets
   // nothing from the event, so without the cache its first render is blank.
   it("gives a late subscriber the current sessions via loadLive", async () => {
@@ -54,7 +62,21 @@ describe("snapshot store", () => {
     store.subscribe((s) => seen.push(s));
 
     expect(seen).toHaveLength(0);
-    expect((await store.loadLive())[0]?.sessionId).toBe("s2");
+    // Full toEqual, not just a sessionId check: guards against loadLive ever
+    // degrading to the reducer's minimal SessionSnapshotEntry shape, which
+    // drops userName/itemName/deviceName — a real regression that a
+    // sessionId-only assertion would not catch.
+    expect(await store.loadLive()).toEqual([session("s2")]);
+  });
+
+  it("reflects only the latest publish, not an accumulation of earlier ones", async () => {
+    const store = createSnapshotStore();
+    const other = session("s7");
+
+    await store.publish([session("s2")]);
+    await store.publish([other]);
+
+    expect(await store.loadLive()).toEqual([other]);
   });
 
   it("stops delivering after unsubscribe", async () => {

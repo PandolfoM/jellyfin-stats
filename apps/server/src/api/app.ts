@@ -34,14 +34,22 @@ export interface AppVariables {
  * The returned unsubscribe must not reject: registerLiveRoute invokes it from
  * the stream's abort path, where Hono runs subscribers through `forEach` with
  * no error handling, and an unobserved rejection terminates the process under
- * Node's default --unhandled-rejections=throw. `off()` is synchronous and
- * cannot throw, so the async wrapper here has nothing that can fail.
+ * Node's default --unhandled-rejections=throw. `createSnapshotStore`'s own
+ * `off()` is synchronous and cannot throw today, but `snapshots` here is an
+ * injected `SnapshotStore` — a future implementation (or a future edit to
+ * this adapter) is not guaranteed to keep that property, so the guard stays
+ * even though nothing currently reachable exercises it.
  */
 export function createLiveSubscriber(snapshots: SnapshotStore): LiveDeps["subscribe"] {
   return async (onMessage) => {
     const off = snapshots.subscribe((sessions) => onMessage(JSON.stringify(sessions)));
     return async () => {
-      off();
+      try {
+        off();
+      } catch {
+        // Whatever went wrong, the unsubscribe caller (the stream's abort
+        // path) cannot observe a rejection here without crashing the process.
+      }
     };
   };
 }

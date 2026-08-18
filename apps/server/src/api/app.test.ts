@@ -2,7 +2,7 @@ import type { LiveSession } from "@jfstats/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp, createImageFetcher, createLiveSubscriber } from "./app.js";
 import type { AppContext } from "../context.js";
-import { createSnapshotStore } from "../sync/snapshot-store.js";
+import { createSnapshotStore, type SnapshotStore } from "../sync/snapshot-store.js";
 
 function testContext(): AppContext {
   return {
@@ -175,11 +175,36 @@ describe("createLiveSubscriber", () => {
     // registerLiveRoute invokes this from the stream's abort path, where Hono
     // runs subscribers through forEach with no error handling — an unobserved
     // rejection there would kill the process under Node's default
-    // --unhandled-rejections=throw. EventEmitter#off is synchronous and cannot
-    // throw, so this has nothing to reject on, but the shape still must hold.
+    // --unhandled-rejections=throw. Against the real createSnapshotStore(),
+    // EventEmitter#off is synchronous and cannot throw, so this direction
+    // alone doesn't exercise the adapter's try/catch — see the next test for
+    // that. This one just pins the resolved shape against the real store.
     const store = createSnapshotStore();
 
     const unsubscribe = await createLiveSubscriber(store)(() => {});
+
+    await expect(unsubscribe()).resolves.toBeUndefined();
+  });
+
+  it("resolves rather than rejecting even when the store's unsubscribe throws", async () => {
+    // createLiveSubscriber is parameterized by SnapshotStore, so this injects
+    // the failure at the real boundary the adapter depends on, rather than
+    // mocking EventEmitter internals (which would only prove the mock
+    // behaves as programmed). A future SnapshotStore implementation, or a
+    // future edit to this file, is not guaranteed to keep subscribe()'s
+    // returned unsubscribe from ever throwing — this is what the adapter's
+    // try/catch exists for.
+    const throwingStore: SnapshotStore = {
+      load: async () => ({}),
+      save: async () => {},
+      publish: async () => {},
+      loadLive: async () => [],
+      subscribe: () => () => {
+        throw new Error("boom");
+      },
+    };
+
+    const unsubscribe = await createLiveSubscriber(throwingStore)(() => {});
 
     await expect(unsubscribe()).resolves.toBeUndefined();
   });
