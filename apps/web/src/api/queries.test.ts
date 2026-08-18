@@ -141,19 +141,43 @@ describe("historyQuery includes its filters in the key", () => {
 });
 
 /**
- * Type-only guard, checked by `tsc --build` (`pnpm typecheck`) and never
+ * Type-only guards, checked by `tsc --build` (`pnpm typecheck`) and never
  * executed by vitest — the same mechanism apps/web/src/api/client.test.ts
  * uses for its four RPC-chain guards.
  *
  * `queries.ts` pins every `InferResponseType<..., 200>` call to the route's
  * success status specifically. Without that pin, `InferResponseType`
  * defaults to a union across *all* the statuses the handler can return —
- * including each route's `{ error: string }` 400 body — and a union that
- * includes `{ error: string }` does not have `plays` on it, so `.plays`
- * below stops typechecking. This is derived from the real exported
- * `overviewQuery` (via its actual `queryFn`'s resolved type), not
- * re-declared independently, so it breaks for real if the pin is ever
- * dropped from queries.ts rather than only from a parallel copy here.
+ * including each route's `{ error: string }` 400 (or, for userDetailQuery,
+ * 404) body — and a union that includes `{ error: string }` does not have
+ * the field accessed below on it, so that access stops typechecking. Each
+ * type here is derived from the real exported factory (via its actual
+ * `queryFn`'s resolved type), not re-declared independently, so a guard
+ * breaks for real if the pin is ever dropped from queries.ts rather than
+ * only from a parallel copy here. One guard per factory — a guard that
+ * covers only one of the seven pinned types would leave the other six free
+ * to regress silently, which is exactly what a single `overviewQuery`-only
+ * guard did in an earlier pass of this file.
  */
 type OverviewQueryData = Awaited<ReturnType<NonNullable<ReturnType<typeof overviewQuery>["queryFn"]>>>;
 type _OverviewFieldAccessTypechecks = OverviewQueryData["plays"];
+
+type SeriesQueryData = Awaited<ReturnType<NonNullable<ReturnType<typeof seriesQuery>["queryFn"]>>>;
+type _SeriesFieldAccessTypechecks = SeriesQueryData[number]["watchMs"];
+
+type TopItemsQueryData = Awaited<ReturnType<NonNullable<ReturnType<typeof topItemsQuery>["queryFn"]>>>;
+type _TopItemsFieldAccessTypechecks = TopItemsQueryData[number]["itemId"];
+
+type UserStatsQueryData = Awaited<ReturnType<NonNullable<ReturnType<typeof userStatsQuery>["queryFn"]>>>;
+type _UserStatsFieldAccessTypechecks = UserStatsQueryData[number]["userId"];
+
+type UserDetailQueryData = Awaited<ReturnType<NonNullable<ReturnType<typeof userDetailQuery>["queryFn"]>>>;
+// `devices` exists only on UserDetail (not on UserStat, its base interface),
+// so this also proves the guard resolved the right one of the two shapes.
+type _UserDetailFieldAccessTypechecks = UserDetailQueryData["devices"];
+
+type LibraryStatsQueryData = Awaited<ReturnType<NonNullable<ReturnType<typeof libraryStatsQuery>["queryFn"]>>>;
+type _LibraryStatsFieldAccessTypechecks = LibraryStatsQueryData[number]["libraryId"];
+
+type HistoryQueryData = Awaited<ReturnType<NonNullable<ReturnType<typeof historyQuery>["queryFn"]>>>;
+type _HistoryFieldAccessTypechecks = HistoryQueryData["total"];
