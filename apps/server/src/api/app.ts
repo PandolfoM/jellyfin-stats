@@ -18,7 +18,7 @@ import { createRateLimiter } from "./rate-limit.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHistoryRoutes } from "./routes/history.js";
 import { registerImageRoutes, type ImageDeps } from "./routes/images.js";
-import { registerLiveRoute, type LiveDeps, type LiveStreamRegistry } from "./routes/live.js";
+import { registerLiveRoute, type LiveDeps } from "./routes/live.js";
 import { registerStatsRoutes } from "./routes/stats.js";
 import { createSessionStore, type SessionRecord } from "./sessions.js";
 
@@ -113,13 +113,13 @@ export function createImageFetcher(
   };
 }
 
-export interface App {
-  app: Hono<{ Variables: AppVariables }>;
-  /** Open SSE streams, so shutdown can end them instead of waiting on them. */
-  liveStreams: LiveStreamRegistry;
-}
-
-export function createApp(context: AppContext): App {
+// No explicit return-type interface on createApp below — an annotation there
+// would erase the richer, chained route schema that registerAuthRoutes hands
+// back (an annotated return type widens to the annotation, not the actual
+// inferred value). AppType is derived from the real return value instead, so
+// `hc<AppType>` on the web side sees the /api/auth/* routes rather than
+// resolving to `unknown`.
+export function createApp(context: AppContext) {
   const app = new Hono<{ Variables: AppVariables }>();
 
   app.get("/api/health", (c) => c.json({ status: "ok" }));
@@ -151,7 +151,10 @@ export function createApp(context: AppContext): App {
   // private media library by walking item ids.
   app.use("/api/images/*", requireAdmin(sessions, cookieConfig));
 
-  registerAuthRoutes(app, {
+  // Captured (rather than the usual bare statement used for the other
+  // registerXRoutes calls below) because this is the one return value the web
+  // client's AppType is built from — see registerAuthRoutes for why.
+  const routedApp = registerAuthRoutes(app, {
     authenticateByName: (u, p) => context.jellyfin.authenticateByName(u, p),
     revokeToken: (t) => context.jellyfin.revokeToken(t),
     sessions,
@@ -197,7 +200,7 @@ export function createApp(context: AppContext): App {
     return c.json({ error: "internal_error" }, 500);
   });
 
-  return { app, liveStreams };
+  return { app: routedApp, liveStreams };
 }
 
-export type AppType = App["app"];
+export type AppType = ReturnType<typeof createApp>["app"];

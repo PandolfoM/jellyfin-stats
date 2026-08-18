@@ -1,0 +1,186 @@
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+
+import { ApiError, api, unwrap } from "../api/client";
+
+export interface SessionUser {
+  userId: string;
+  userName: string;
+  isAdmin: boolean;
+}
+
+/**
+ * "error" is deliberately its own state, distinct from "anonymous". A 500 from
+ * `/api/auth/me` means the server is broken, not that the user is logged out —
+ * showing a login form in that case invites the user to type their password at
+ * a service that cannot check it.
+ */
+export type SessionStatus = "loading" | "authenticated" | "anonymous" | "error";
+
+/**
+ * The four outcomes the login endpoint distinguishes, each with a different
+ * remedy: fix the password, use an admin account, wait, or go check the
+ * Jellyfin server. "unknown_error" covers any other status so login.tsx always
+ * has something to render, even for a failure mode the API has never returned.
+ */
+export type LoginErrorCode =
+  | "invalid_credentials"
+  | "not_an_administrator"
+  | "too_many_attempts"
+  | "jellyfin_unavailable"
+  | "unknown_error";
+
+export class LoginError extends Error {
+  readonly code: LoginErrorCode;
+
+  constructor(code: LoginErrorCode) {
+    super(code);
+    this.name = "LoginError";
+    this.code = code;
+  }
+}
+
+function mapLoginStatus(status: number): LoginErrorCode {
+  switch (status) {
+    case 401:
+      return "invalid_credentials";
+    case 403:
+      return "not_an_administrator";
+    case 429:
+      return "too_many_attempts";
+    case 503:
+      return "jellyfin_unavailable";
+    default:
+      return "unknown_error";
+  }
+}
+
+interface SessionState {
+  status: SessionStatus;
+  user: SessionUser | null;
+  /** Set only in the "error" state, so the caller can show what went wrong. */
+  error: string | null;
+}
+
+export interface SessionContextValue extends SessionState {
+  login(username: string, password: string): Promise<void>;
+  logout(): Promise<void>;
+}
+
+const SessionContext = createContext<SessionContextValue | null>(null);
+
+const LOADING_STATE: SessionState = { status: "loading", user: null, error: null };
+const ANONYMOUS_STATE: SessionState = { status: "anonymous", user: null, error: null };
+
+/**
+ * Resolves the current session from `GET /api/auth/me`, the single source of
+ * truth for who (if anyone) is signed in. A 401 is the ordinary "not signed in
+ * yet" state; anything else that isn't a 2xx is a real failure and must not be
+ * collapsed into "anonymous".
+ */
+async function resolveSession(): Promise<SessionState> {
+  const response = await api.api.auth.me.$get();
+
+  try {
+    const user = await unwrap<SessionUser>(response);
+    return { status: "authenticated", user, error: null };
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      return ANONYMOUS_STATE;
+    }
+    return {
+      status: "error",
+      user: null,
+      error: err instanceof Error ? err.message : "Could not resolve the current session.",
+    };
+  }
+}
+
+/**
+ * Posts the login request and, on success, re-resolves the session from
+ * `/api/auth/me` rather than trusting the login response body — the client's
+ * notion of "who is signed in" always comes from the one source of truth. On
+ * failure it throws a `LoginError` carrying which of the API's four failure
+ * codes occurred, so the login screen can render a specific remedy instead of
+ * a generic "login failed".
+ */
+async function performLogin(
+  username: string,
+  password: string,
+  setState: (state: SessionState) => void,
+): Promise<void> {
+  const response = await api.api.auth.login.$post({ json: { username, password } });
+
+  if (!response.ok) {
+    throw new LoginError(mapLoginStatus(response.status));
+  }
+
+  setState(await resolveSession());
+}
+
+export function SessionProvider({ children }: { children: ReactNode }) {
+  const [state, setState] = useState<SessionState>(LOADING_STATE);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void resolveSession().then((next) => {
+      if (!cancelled) setState(next);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // The password is never stored — it lives only as a parameter here, passed
+  // straight into the request body, never assigned to state or a ref.
+  const login = useCallback((username: string, password: string): Promise<void> => {
+    const attempt = performLogin(username, password, setState);
+
+    // A rejection is only "unhandled" (per Node/V8) if nothing has attached a
+    // reaction to *this* promise instance by the time it settles. Callers that
+    // fire this and forget it (an onClick that does `void login(...)` without
+    // awaiting) would otherwise trip that diagnostic even though rejecting on
+    // a bad login is the documented behavior. This no-op catch marks `attempt`
+    // handled without swallowing the rejection — it is the same promise
+    // instance returned below, so a caller that does `await login(...)` in a
+    // try/catch (login.tsx) still observes the rejection independently.
+    attempt.catch(() => {});
+
+    return attempt;
+  }, []);
+
+  const logout = useCallback(async (): Promise<void> => {
+    try {
+      await api.api.auth.logout.$post();
+    } catch {
+      // The cookie is gone either way (or was never valid); local state must
+      // still clear even if the request itself failed to reach the server.
+    } finally {
+      setState(ANONYMOUS_STATE);
+    }
+  }, []);
+
+  const value = useMemo<SessionContextValue>(
+    () => ({ ...state, login, logout }),
+    [state, login, logout],
+  );
+
+  return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
+}
+
+export function useSession(): SessionContextValue {
+  const context = useContext(SessionContext);
+  if (context === null) {
+    throw new Error("useSession must be used within a SessionProvider");
+  }
+  return context;
+}

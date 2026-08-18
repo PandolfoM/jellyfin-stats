@@ -8,6 +8,7 @@ export default defineConfig({
       "apps/web/src/**/*.test.{ts,tsx}",
     ],
     environment: "node",
+    setupFiles: ["./apps/web/vitest.setup.ts"],
     testTimeout: 15_000,
   },
 });

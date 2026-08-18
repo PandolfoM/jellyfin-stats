@@ -7,7 +7,8 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "moduleResolution": "Bundler",
     "noEmit": false,
-    "emitDeclarationOnly": true
+    "emitDeclarationOnly": true,
+    "types": ["@testing-library/jest-dom/vitest"]
   },
   "include": ["src/**/*"],
   "references": [{ "path": "../server" }]
