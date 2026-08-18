@@ -21,6 +21,7 @@ import { registerImageRoutes, type ImageDeps } from "./routes/images.js";
 import { registerLiveRoute, type LiveDeps } from "./routes/live.js";
 import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerStatsRoutes } from "./routes/stats.js";
+import { registerStaticRoutes } from "./static.js";
 import { createSessionStore, type SessionRecord } from "./sessions.js";
 
 /** Populated by requireAdmin (see middleware/auth.ts) once a request's
@@ -221,6 +222,8 @@ export function createApp(context: AppContext) {
     loadCurrent: () => context.snapshots.loadLive(),
     subscribe: createLiveSubscriber(context.redis, context.logger),
   });
+
+  registerStaticRoutes(app, context.env.WEB_ROOT);
 
   app.notFound((c) => c.json({ error: "not_found" }, 404));
 
