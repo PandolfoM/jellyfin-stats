@@ -12,6 +12,18 @@ import type { Env, Hono, Schema } from "hono";
  *
  * Passing `undefined` registers nothing, which is the development case: Vite
  * serves the SPA and apps/web/dist does not exist.
+ *
+ * Traversal note: the asset handler below resolves `serveStatic({ root })`
+ * against the real request path, so it's @hono/node-server's own traversal
+ * check that keeps it from escaping `root` — that check only runs on the
+ * branch of serveStatic taken when `options.path` is unset. The SPA-fallback
+ * handler sets `path: "index.html"` explicitly, so it never takes that
+ * branch and the check never runs for it — but it is still safe, because the
+ * file it serves is a hardcoded literal, not derived from the request path
+ * at all. There is nothing there for a traversal string to influence. Do not
+ * "fix" this by deriving the fallback's path from the request — that would
+ * both reintroduce a real traversal surface and break deep-link refreshes,
+ * which depend on every non-API, non-asset path rendering the same shell.
  */
 export function registerStaticRoutes<E extends Env, S extends Schema>(
   app: Hono<E, S>,

@@ -1,3 +1,10 @@
+# Anchors so the compose-network connection strings below have exactly one
+# copy each — three services need DATABASE_URL and two need REDIS_URL, and a
+# hand-copied string in each service is exactly how one of them quietly ends
+# up out of sync with the others after an edit to just one.
+x-database-url: &database-url postgres://jfstats:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/jfstats
+x-redis-url: &redis-url redis://redis:6379
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -40,11 +47,11 @@ services:
   # would leave every container trying to dial its own loopback interface.
   migrate:
     build: .
-    command: ["apps/server/node_modules/.bin/tsx", "apps/server/src/migrate.ts"]
+    command: ["node_modules/.bin/tsx", "apps/server/src/migrate.ts"]
     restart: "no"
     env_file: .env
     environment:
-      DATABASE_URL: postgres://jfstats:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/jfstats
+      DATABASE_URL: *database-url
     depends_on:
       postgres:
         condition: service_healthy
@@ -54,8 +61,8 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: postgres://jfstats:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/jfstats
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: *database-url
+      REDIS_URL: *redis-url
     ports:
       - "${PORT:-3000}:3000"
     depends_on:
@@ -68,12 +75,12 @@ services:
 
   worker:
     build: .
-    command: ["apps/server/node_modules/.bin/tsx", "apps/server/src/worker.ts"]
+    command: ["node_modules/.bin/tsx", "apps/server/src/worker.ts"]
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: postgres://jfstats:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/jfstats
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: *database-url
+      REDIS_URL: *redis-url
     depends_on:
       postgres:
         condition: service_healthy
