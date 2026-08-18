@@ -19,7 +19,8 @@ export async function withTestDatabase(fn: (db: Db) => Promise<void>): Promise<v
   try {
     await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
     await pool.query(`
-      TRUNCATE playback_rollup_daily, playback_sessions, items, libraries, devices, jellyfin_users
+      TRUNCATE playback_rollup_daily, playback_sessions, items, libraries, devices, jellyfin_users,
+        sessions, rate_limits, job_runs
       RESTART IDENTITY CASCADE
     `);
     await fn(db);
