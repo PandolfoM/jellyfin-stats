@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { formatCount, formatDay, formatDuration } from "./format";
+import { formatCount, formatDay, formatDuration, formatPercent } from "./format";
 
 describe("formatDuration", () => {
   it("renders hours and minutes above an hour", () => {
@@ -59,5 +59,21 @@ describe("formatCount", () => {
 
   it("leaves small numbers alone", () => {
     expect(formatCount(7)).toBe("7");
+  });
+});
+
+describe("formatPercent", () => {
+  it("renders a 0-1 fraction as a rounded whole-number percentage", () => {
+    expect(formatPercent(0.9)).toBe("90%");
+  });
+
+  it("rounds rather than truncates", () => {
+    // 0.905 * 100 = 90.5 — truncation would give "90%"; rounding gives "91%".
+    expect(formatPercent(0.905)).toBe("91%");
+  });
+
+  it("renders the 0 and 1 boundaries", () => {
+    expect(formatPercent(0)).toBe("0%");
+    expect(formatPercent(1)).toBe("100%");
   });
 });

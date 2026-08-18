@@ -25,15 +25,14 @@ interface NavItem {
    * runtime — the entire reason `Register` was deferred until routes with
    * real path literals existed to register against.
    *
-   * `| "/settings"` is unioned in by hand, not derived from `AppRoutePath`,
-   * because `/settings` (Task 11) has no route file yet and so cannot appear
-   * in `router.ts`'s route tree or `AppRoutePath`. This is a deliberate,
-   * documented gap, not an oversight: the alternative — leaving this whole
-   * field as `string` — would silently defeat the narrowing for all six
-   * items, not just this one. Task 11 should drop this manual union member
-   * once `/settings` has a real route and is folded into `AppRoutePath`.
+   * Until Task 11, this field carried a hand-unioned `| "/settings"` member
+   * and the `Link` below carried an `as AppRoutePath` cast, because
+   * `/settings` had no route file yet and so could not appear in
+   * `router.ts`'s route tree or `AppRoutePath`. Task 11 added the real
+   * `/settings` route, so both are gone: `to` narrows to the actual
+   * registered paths alone, with no exceptions.
    */
-  to: AppRoutePath | "/settings";
+  to: AppRoutePath;
   icon: typeof LayoutDashboard;
 }
 
@@ -70,15 +69,7 @@ export function AppShell({ userName, onLogout, children }: AppShellProps) {
             return (
               <Link
                 key={item.to}
-                // `Register`'s route-path union (router.ts) does not include
-                // "/settings" — that route doesn't exist until Task 11, so it
-                // cannot be part of the real registered tree. This is the one
-                // narrow, explained exception to real path-checking on this
-                // list: every other value flowing through `item.to` (its
-                // type, `NavItem.to` above, still rejects a typo in any of
-                // them) is validated against the actual registered routes.
-                // Task 11 should remove this cast once `/settings` is real.
-                to={item.to as AppRoutePath}
+                to={item.to}
                 className={navLinkClassName}
                 activeOptions={{ exact: item.to === "/" }}
                 activeProps={{ className: cn(navLinkClassName, "bg-secondary text-secondary-foreground") }}

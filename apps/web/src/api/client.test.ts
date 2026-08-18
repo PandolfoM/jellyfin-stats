@@ -110,3 +110,4 @@ type _HistoryIsCallable = AssertCallable<typeof api.api.history.$get>;
 // access types applied to that.
 type _ImagesItemIsCallable = AssertCallable<(typeof api.api.images.items)[":itemId"]["$get"]>;
 type _LiveIsCallable = AssertCallable<typeof api.api.live.$get>;
+type _SettingsIsCallable = AssertCallable<typeof api.api.settings.$get>;

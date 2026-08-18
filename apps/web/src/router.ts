@@ -7,6 +7,7 @@ import { librariesRoute } from "./routes/libraries";
 import { libraryDetailRoute } from "./routes/libraries.$libraryId";
 import { liveRoute } from "./routes/live";
 import { LoginRoute } from "./routes/login";
+import { settingsRoute } from "./routes/settings";
 import { usersRoute } from "./routes/users";
 import { userDetailRoute } from "./routes/users.$userId";
 
@@ -24,6 +25,7 @@ const routeTree = rootRoute.addChildren([
   userDetailRoute,
   librariesRoute,
   libraryDetailRoute,
+  settingsRoute,
   loginRoute,
 ]);
 
@@ -56,11 +58,10 @@ export type AppRouter = ReturnType<typeof createAppRouter>;
  * route in this tree is a direct child of the root with no explicit `id`
  * override.
  *
- * `/settings` (Task 11) is deliberately absent — that route file does not
- * exist yet, so it cannot appear in `routeTree` or this union. See
- * `AppShell.tsx`'s `NavItem.to` for how that gap is carried forward
- * explicitly instead of silently, and this task's report for the full
- * reasoning.
+ * `/settings` (Task 11) is now a real route and included below like every
+ * other one — `AppShell.tsx`'s `NavItem.to` no longer needs the manual
+ * `| "/settings"` union member or the `as AppRoutePath` cast it carried
+ * while this route didn't exist yet.
  */
 export type AppRoutePath =
   | typeof indexRoute.fullPath
@@ -70,6 +71,7 @@ export type AppRoutePath =
   | typeof userDetailRoute.fullPath
   | typeof librariesRoute.fullPath
   | typeof libraryDetailRoute.fullPath
+  | typeof settingsRoute.fullPath
   | typeof loginRoute.fullPath;
 
 declare module "@tanstack/react-router" {

@@ -19,6 +19,7 @@ import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHistoryRoutes } from "./routes/history.js";
 import { registerImageRoutes, type ImageDeps } from "./routes/images.js";
 import { registerLiveRoute, type LiveDeps } from "./routes/live.js";
+import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerStatsRoutes } from "./routes/stats.js";
 import { createSessionStore, type SessionRecord } from "./sessions.js";
 
@@ -151,6 +152,10 @@ export function createApp(context: AppContext) {
   // Ungated, this would let anyone who can reach the port enumerate a
   // private media library by walking item ids.
   app.use("/api/images/*", requireAdmin(sessions, cookieConfig));
+  // The effective sync intervals, completion threshold, and Jellyfin server
+  // URL are configuration, not secrets — but they are still only meant for
+  // whoever configured this deployment, not anyone who can reach the port.
+  app.use("/api/settings", requireAdmin(sessions, cookieConfig));
 
   // Captured, and threaded into every registerXRoutes call below, because the
   // chained return value is what the web client's AppType is built from — see
@@ -193,7 +198,20 @@ export function createApp(context: AppContext) {
     getHistory: (options) => getHistory(context.db, options),
   });
 
-  const imagesApp = registerImageRoutes(historyApp, { fetchImage: createImageFetcher(context.env) });
+  // Built from context.env by picking exactly these four fields, by name —
+  // this call site is the allow-list boundary settings.ts's own comment
+  // refers to. Passing context.env itself (or any wider object) here would
+  // defeat the whole point: registerSettingsRoutes only ever reads the
+  // fields SettingsDeps declares, but nothing stops a future edit from
+  // handing it something bigger unless this stays an explicit pick.
+  const settingsApp = registerSettingsRoutes(historyApp, {
+    sessionPollIntervalMs: context.env.SESSION_POLL_INTERVAL_MS,
+    referenceSyncIntervalMs: context.env.REFERENCE_SYNC_INTERVAL_MS,
+    completionThreshold: context.env.COMPLETION_THRESHOLD,
+    jellyfinUrl: context.env.JELLYFIN_URL,
+  });
+
+  const imagesApp = registerImageRoutes(settingsApp, { fetchImage: createImageFetcher(context.env) });
 
   // registerLiveRoute returns one object carrying both the chained app (used
   // just below) and the LiveStreamRegistry members themselves — see that

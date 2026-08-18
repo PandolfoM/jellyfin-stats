@@ -27,3 +27,10 @@ export function formatDay(day: string): string {
 export function formatCount(n: number): string {
   return new Intl.NumberFormat("en-GB").format(n);
 }
+
+/** Takes a 0-1 fraction (e.g. `COMPLETION_THRESHOLD`) and renders it as a
+ * rounded whole-number percentage, so a settings screen never has to show a
+ * raw fraction like "0.9" to a human. */
+export function formatPercent(fraction: number): string {
+  return `${Math.round(fraction * 100)}%`;
+}

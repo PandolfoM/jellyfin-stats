@@ -31,6 +31,7 @@ export type UserStatsResponse = InferResponseType<typeof api.api.stats.users.$ge
 export type UserDetailResponse = InferResponseType<(typeof api.api.stats.users)[":userId"]["$get"], 200>;
 export type LibraryStatsResponse = InferResponseType<typeof api.api.stats.libraries.$get, 200>;
 export type HistoryResponse = InferResponseType<typeof api.api.history.$get, 200>;
+export type SettingsResponse = InferResponseType<typeof api.api.settings.$get, 200>;
 
 export interface TopItemsOptions {
   limit?: number;
@@ -63,6 +64,7 @@ const queryKeys = {
   userDetail: (userId: string, range: DateRange) => ["stats", "users", userId, range] as const,
   libraries: (range: DateRange) => ["stats", "libraries", range] as const,
   history: (opts: HistoryQueryOptions) => ["history", opts] as const,
+  settings: () => ["settings"] as const,
 };
 
 export function overviewQuery(range: DateRange) {
@@ -148,5 +150,12 @@ export function historyQuery(opts: HistoryQueryOptions) {
           },
         }),
       ),
+  });
+}
+
+export function settingsQuery() {
+  return queryOptions({
+    queryKey: queryKeys.settings(),
+    queryFn: async () => unwrap<SettingsResponse>(await api.api.settings.$get()),
   });
 }
