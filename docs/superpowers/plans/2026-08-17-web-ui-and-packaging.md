@@ -754,13 +754,13 @@ The password is read from FormData at submit and never held in state."
 
 - [ ] **Step 1: Write the failing tests**
 
-`apps/web/src/routes/guard.test.tsx` must assert:
+`apps/web/src/routes/guard.test.tsx` must assert (five cases — the `error` status is a distinct state and must not be folded into `anonymous`):
 1. While `status === "loading"`, no route content and no data fetch — render a shell skeleton.
 2. When `anonymous`, a protected route redirects to `/login` and **does not** render its content.
 3. When `authenticated`, the protected route renders.
 4. `/login` is reachable while anonymous and does **not** redirect.
 
-`AppShell.test.tsx` must assert it renders the seven navigation links, shows the signed-in user's name, and calls `onLogout` when the logout control is used — with no fetching of its own.
+`AppShell.test.tsx` must assert it renders the six navigation links, shows the signed-in user's name, and calls `onLogout` when the logout control is used — with no fetching of its own.
 
 Write these as real assertions on rendered output, not on mocks. **After writing each, ask what you would have to break for it to fail** — a guard test that renders the same thing in both states proves nothing.
 
