@@ -987,16 +987,353 @@ Read-only in this plan: show the effective sync intervals, completion threshold,
 
 **This is the task that makes `docker compose up -d` deploy the whole product.**
 
+**Interfaces:**
+- Consumes: `createApp(context)` and `AppContext` from `apps/server/src/api/app.ts`; `loadEnv` / `AppEnv` from `packages/shared/src/env.ts`; the built SPA in `apps/web/dist` (Task 1 configures Vite's `build.outDir`).
+- Produces: `WEB_ROOT` on `AppEnv`; `apps/server/src/migrate.ts` as the one-shot migration entrypoint; a `Dockerfile` whose image runs three commands — `src/api.ts`, `src/worker.ts`, `src/migrate.ts`.
+
+**Four facts established by probe before this task was written. Do not re-derive them, and do not "fix" code that depends on them:**
+
+1. `node apps/server/dist/api.js` fails today with `ERR_UNKNOWN_FILE_EXTENSION`. All three workspace packages declare `"exports": "./src/index.ts"`, so compiled output resolves `@jfstats/db` back to TypeScript source. Making `node dist/*.js` work means restructuring the `exports` map of every package with dual dev/prod conditions.
+2. BullMQ reads `.lua` command files from disk at runtime (`bullmq/dist/cjs/commands/*.lua`). Bundling the worker into a single file with esbuild breaks that loading, so bundling is the **riskier** option here, not the safer one.
+3. `serveStatic({ root })` accepts an **absolute** path and serves correctly from it — despite its type comment claiming the root is resolved against the current working directory. Use absolute paths; `pnpm --filter` sets cwd to the *package* directory while Vitest runs from the repo root, so a relative root would mean two different directories.
+4. `serveStatic` already rejects path traversal. `/../../package.json`, `/..%2f..%2fpackage.json`, and `/%2e%2e/package.json` all returned 404 against a root containing a real `index.html`. **Do not add your own traversal guard** — write the test that pins this behavior, so a future dependency bump that regresses it fails loudly.
+
 **Design points:**
-- **Static serving must not shadow the API.** Register the SPA fallback *after* all `/api` routes, and exclude `/api/*` from it — otherwise an unknown API path returns `index.html` with a 200, and every client error becomes a confusing HTML body.
-- **The SPA fallback returns `index.html` for unknown non-API paths**, so a deep link like `/users/abc` works on refresh rather than 404ing.
-- **Multi-stage build**: install with pnpm and build both `apps/web` and the server's TypeScript, then copy only production dependencies and build output into a slim runtime layer.
-- The image runs **two commands from one image** — `api` and `worker` — as separate compose services, exactly as the spec describes.
-- **Do not ship `tsx` in the runtime layer.** Compile the server, and fix whatever prevents `node dist/api.js` from running today (Plan 1 recorded that workspace packages resolve `main` to `.ts` sources, which is why the compiled entrypoint did not work; resolving that is part of this task).
+- **Ship `tsx` in the runtime layer, and do not produce `dist/` in the image at all.** This reverses the instruction an earlier draft of this plan carried. Given fact 1, the alternative is restructuring three packages' export maps with `development`/`default` conditions — a change that touches every import path in the repo and risks subtle resolution bugs in test, dev, and prod differently, to save roughly 30 MB on a self-hosted image whose base layer is already ~130 MB. `tsx` is a mature runtime loader, the startup cost is about a second on a long-lived daemon, and shipping no `dist/` means there is no broken compiled artifact left lying around to trip over later. Move `tsx` from `devDependencies` to `dependencies` in `apps/server/package.json` — it is a runtime dependency now, and that is what lets the runtime stage install with `--prod`.
+- **Static serving must not shadow the API.** Both static handlers return `next()` immediately for any path starting with `/api/`, and they are registered *after* every `/api` route. Otherwise an unknown API path returns `index.html` with a 200 and every client error becomes a confusing HTML body.
+- **The SPA fallback returns `index.html` for unknown non-API paths**, so a deep link like `/users/abc` survives a refresh.
+- **Static serving is optional and off by default.** In development Vite serves the SPA and `apps/web/dist` does not exist. When `WEB_ROOT` is unset, register nothing and keep the existing JSON 404 — this is also what makes the non-vacuity probe in Step 6 possible.
+- **Migrations run as a one-shot compose service, not on API start.** Two services starting concurrently would race the same migration. Use `migrate()` from `drizzle-orm/node-postgres/migrator` — `drizzle-orm` is already a production dependency, so this avoids shipping `drizzle-kit` (a devDependency) into the image.
+- The image runs **three commands from one image**, as separate compose services.
 
-Assert in `static.test.ts`: a request to an unknown `/api/...` path returns JSON 404, **not** `index.html`; a request to `/users/abc` returns `index.html`; a request to an existing asset path returns that asset.
+- [ ] **Step 1: Add `WEB_ROOT` to the environment schema**
 
-- [ ] **Steps:** failing test → run → implement Dockerfile and static serving → run → build the image → `docker compose up -d` → confirm the dashboard loads at `http://localhost:3000` and a deep link survives a refresh → `pnpm test && pnpm typecheck` → commit.
+In `packages/shared/src/env.ts`, add to the `z.object({ ... })` schema:
+
+```ts
+  // Absolute path to the built SPA. Unset in development, where Vite serves it.
+  WEB_ROOT: z.string().min(1).optional(),
+```
+
+- [ ] **Step 2: Write the failing test**
+
+Create `apps/server/src/api/static.test.ts`. This builds a real directory on disk rather than mocking the filesystem — a hand-written fixture of a filesystem is exactly the pattern that produced this project's worst defects.
+
+```ts
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { Hono } from "hono";
+import { registerStaticRoutes } from "./static.js";
+
+let webRoot: string;
+
+beforeAll(() => {
+  webRoot = mkdtempSync(path.join(tmpdir(), "jfstats-web-"));
+  mkdirSync(path.join(webRoot, "assets"));
+  writeFileSync(path.join(webRoot, "index.html"), "<!doctype html><title>jfstats</title>");
+  writeFileSync(path.join(webRoot, "assets", "app-abc123.js"), "console.log('spa');");
+});
+
+afterAll(() => {
+  rmSync(webRoot, { recursive: true, force: true });
+});
+
+/** Mirrors production order: API routes and the JSON 404 exist before static is registered. */
+function buildApp(root: string | undefined): Hono {
+  const app = new Hono();
+  app.get("/api/health", (c) => c.json({ status: "ok" }));
+  registerStaticRoutes(app, root);
+  app.notFound((c) => c.json({ error: "not_found" }, 404));
+  return app;
+}
+
+describe("static serving", () => {
+  it("serves index.html for a deep link so a refresh does not 404", async () => {
+    const res = await buildApp(webRoot).request("/users/abc");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("<title>jfstats</title>");
+  });
+
+  it("serves a real asset with its own content", async () => {
+    const res = await buildApp(webRoot).request("/assets/app-abc123.js");
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("console.log('spa');");
+  });
+
+  it("leaves an unknown /api path as a JSON 404 rather than shadowing it with index.html", async () => {
+    const res = await buildApp(webRoot).request("/api/does-not-exist");
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "not_found" });
+  });
+
+  it("does not shadow a registered API route", async () => {
+    const res = await buildApp(webRoot).request("/api/health");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: "ok" });
+  });
+
+  // Guards the non-vacuity of every assertion above: with WEB_ROOT unset the
+  // same deep link must 404, which proves the fallback is what serves it.
+  it("registers nothing when no web root is configured", async () => {
+    const res = await buildApp(undefined).request("/users/abc");
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "not_found" });
+  });
+
+  // Pins serveStatic's own traversal handling (verified by probe) so a
+  // dependency bump that regresses it fails here rather than in production.
+  it.each(["/../../package.json", "/..%2f..%2fpackage.json", "/%2e%2e/package.json"])(
+    "refuses to escape the web root via %s",
+    async (attack) => {
+      const res = await buildApp(webRoot).request(attack);
+      const body = await res.text();
+      expect(body).not.toContain("@jfstats/server");
+      expect(body).not.toContain("dependencies");
+    },
+  );
+});
+```
+
+- [ ] **Step 3: Run the test and confirm it fails**
+
+Run: `pnpm vitest run apps/server/src/api/static.test.ts`
+Expected: FAIL — `Cannot find module './static.js'`.
+
+- [ ] **Step 4: Implement static serving**
+
+Create `apps/server/src/api/static.ts`:
+
+```ts
+import { serveStatic } from "@hono/node-server/serve-static";
+import type { Hono } from "hono";
+
+/**
+ * Serves the built SPA. Registered after every /api route so it can never
+ * shadow one: both handlers defer immediately on an /api path, which keeps an
+ * unknown API route a JSON 404 instead of a 200 carrying index.html.
+ *
+ * `root` must be absolute — @hono/node-server resolves a relative root against
+ * the current working directory, which differs between `pnpm --filter` (the
+ * package directory) and Vitest (the repo root).
+ *
+ * Passing `undefined` registers nothing, which is the development case: Vite
+ * serves the SPA and apps/web/dist does not exist.
+ */
+export function registerStaticRoutes(app: Hono, root: string | undefined): void {
+  if (root === undefined) return;
+
+  const isApi = (path: string): boolean => path === "/api" || path.startsWith("/api/");
+
+  // Real files: assets, favicon, manifest. Falls through when nothing matches.
+  app.use("*", async (c, next) => {
+    if (isApi(c.req.path)) return next();
+    return serveStatic({ root })(c, next);
+  });
+
+  // Client-routed paths: anything left over renders the SPA shell.
+  app.get("*", async (c, next) => {
+    if (isApi(c.req.path)) return next();
+    return serveStatic({ root, path: "index.html" })(c, next);
+  });
+}
+```
+
+Wire it into `apps/server/src/api/app.ts`, immediately **after** `registerLiveRoute` and **before** `app.notFound(...)`:
+
+```ts
+  registerStaticRoutes(app, context.env.WEB_ROOT);
+```
+
+with `import { registerStaticRoutes } from "./static.js";` at the top.
+
+- [ ] **Step 5: Run the test and confirm it passes**
+
+Run: `pnpm vitest run apps/server/src/api/static.test.ts`
+Expected: PASS, 9 tests (5 named cases + 3 traversal cases + the API-health case).
+
+- [ ] **Step 6: Prove the API guard is load-bearing, then restore it**
+
+Temporarily delete the `if (isApi(c.req.path)) return next();` line from the **second** handler in `static.ts` and rerun. The "leaves an unknown /api path as a JSON 404" test must go **red** — if it stays green, the test is not testing what it claims and must be fixed before continuing. Restore the line and confirm green again. Report both outcomes.
+
+- [ ] **Step 7: Add the migration entrypoint**
+
+Create `apps/server/src/migrate.ts`:
+
+```ts
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { drizzle } from "drizzle-orm/node-postgres";
+import pg from "pg";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { loadEnv } from "@jfstats/shared";
+
+const env = loadEnv();
+const pool = new pg.Pool({ connectionString: env.DATABASE_URL });
+
+// Resolved from this file, not from cwd: compose runs it from /app.
+const migrationsFolder = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../packages/db/drizzle",
+);
+
+try {
+  await migrate(drizzle(pool), { migrationsFolder });
+  console.log("migrations applied");
+} finally {
+  await pool.end();
+}
+```
+
+Verify it against the real database before trusting it — a migration entrypoint that silently applies nothing is the worst possible failure here:
+
+```bash
+pnpm --filter @jfstats/server exec tsx --env-file=../../.env src/migrate.ts
+```
+
+Expected: `migrations applied`, and re-running is a no-op rather than an error. Confirm both runs.
+
+- [ ] **Step 8: Add `.dockerignore`**
+
+```
+node_modules
+**/node_modules
+**/dist
+.git
+.env
+.env.*
+!.env.example
+*.log
+.worktrees
+docs
+playwright-report
+test-results
+```
+
+`.env` is listed explicitly: the build context would otherwise carry the real Jellyfin URL and API key into an image layer.
+
+- [ ] **Step 9: Move `tsx` to production dependencies**
+
+In `apps/server/package.json`, move `"tsx": "^4.19.2"` out of `devDependencies` and into `dependencies`, then run `pnpm install` to update the lockfile. Without this, the runtime stage's `--prod` install omits it and every entrypoint fails.
+
+- [ ] **Step 10: Write the Dockerfile**
+
+```dockerfile
+# syntax=docker/dockerfile:1
+
+FROM node:22-alpine AS base
+ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
+RUN corepack enable
+WORKDIR /app
+
+# Manifests first so the dependency layers survive source-only changes.
+FROM base AS manifests
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY apps/server/package.json apps/server/
+COPY apps/web/package.json apps/web/
+COPY packages/shared/package.json packages/shared/
+COPY packages/db/package.json packages/db/
+COPY packages/jellyfin/package.json packages/jellyfin/
+
+# Full install, then build the SPA.
+FROM manifests AS build
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+COPY . .
+RUN pnpm --filter @jfstats/web build
+
+# Production dependencies only — no Vite, no Playwright, no testcontainers.
+FROM manifests AS prod-deps
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --prod
+
+FROM base AS runtime
+ENV NODE_ENV=production WEB_ROOT=/app/web
+COPY --from=prod-deps /app/node_modules ./node_modules
+COPY --from=prod-deps /app/apps/server/node_modules ./apps/server/node_modules
+COPY --from=prod-deps /app/packages/shared/node_modules ./packages/shared/node_modules
+COPY --from=prod-deps /app/packages/db/node_modules ./packages/db/node_modules
+COPY --from=prod-deps /app/packages/jellyfin/node_modules ./packages/jellyfin/node_modules
+COPY package.json pnpm-workspace.yaml ./
+COPY apps/server ./apps/server
+COPY packages ./packages
+COPY --from=build /app/apps/web/dist ./web
+USER node
+EXPOSE 3000
+CMD ["node_modules/.bin/tsx", "apps/server/src/api.ts"]
+```
+
+Note `WEB_ROOT=/app/web` is absolute, per fact 3. The `CMD` invokes `tsx` through its bin path rather than `pnpm exec`, so the process is PID 1's direct child and receives signals without a shell in between.
+
+- [ ] **Step 11: Complete `docker-compose.yml`**
+
+Append to the existing `services:` block (which already defines `postgres` and `redis`):
+
+```yaml
+  migrate:
+    build: .
+    command: ["node_modules/.bin/tsx", "apps/server/src/migrate.ts"]
+    restart: "no"
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build: .
+    command: ["node_modules/.bin/tsx", "apps/server/src/worker.ts"]
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+```
+
+The container always listens on 3000; `${PORT:-3000}` chooses only the **host** port. Do not pass `PORT` through to the container as well — that would move the listener out from under the published mapping. Plan 2 shipped exactly this bug in reverse (compose published `${API_PORT}` while the app read `PORT`).
+
+- [ ] **Step 12: Build and verify against real containers**
+
+```bash
+docker compose build && docker compose up -d
+```
+
+Confirm each of the following and report the actual output, not a summary:
+- `docker compose ps` shows `migrate` exited 0, with `api` and `worker` running.
+- `curl -s http://localhost:3000/api/health` returns JSON.
+- `curl -s http://localhost:3000/` returns the SPA's HTML.
+- `curl -si http://localhost:3000/users/abc | head -1` returns `200`, and the body is the same HTML — the deep link works on refresh.
+- `curl -si http://localhost:3000/api/nope | head -1` returns `404` with a JSON body.
+- `docker compose logs worker` shows a poll cycle, not a crash loop.
+- `docker image inspect jellyfin-stats-api --format '{{.Size}}'` — record the number in the commit message.
+
+- [ ] **Step 13: Full suite and typecheck**
+
+Run: `pnpm test && pnpm typecheck`
+Expected: PASS with 9 more tests than the previous task's baseline, `typecheck` exit 0.
+
+- [ ] **Step 14: Commit**
+
+```bash
+git add Dockerfile .dockerignore docker-compose.yml apps/server packages/shared pnpm-lock.yaml
+git commit -m "feat: serve the SPA from the API and add the production image"
+```
 
 ---
 
@@ -1023,11 +1360,11 @@ Assert: redirect to `/login` when anonymous; successful login lands on the dashb
 
 **Spec coverage.** Every Plan 3 requirement maps to a task: Vite + React + TanStack + Tailwind + shadcn → Tasks 1–2; the three-layer component architecture → Tasks 2, 4, 6, and exercised by 7–11; dark mode → Task 2; the seven routes → Tasks 3, 4, 7, 8, 9, 10, 11; poster art proxied so the browser never holds the API key → Task 6's `PosterImage`; charts following the `dataviz` skill → Task 6; the production multi-stage image and one-port static serving → Task 12; the Playwright smoke test → Task 13.
 
-**Carried from earlier follow-ups:** Task 12 resolves the compiled-entrypoint problem Plan 1 recorded (workspace packages resolving `main` to `.ts` sources), which is what made `node dist/*.js` a no-op.
+**Carried from earlier follow-ups:** Task 12 settles the compiled-entrypoint problem Plan 1 recorded (workspace packages resolving `main` to `.ts` sources), which is what made `node dist/*.js` a no-op. It settles it by shipping `tsx` and producing no `dist/` in the image at all, rather than by restructuring the export maps — see Task 12's fact list for the evidence and the reasoning.
 
 **Deliberately not in scope:** per-user session revocation, moving the image fetch into `packages/jellyfin`, and the remaining deferred test-coverage items — all recorded in the two follow-up documents and none blocking a working UI.
 
-**Where this plan is most likely to need a decision mid-flight:** Task 12's compiled-output problem. If making `node dist/api.js` work requires restructuring every workspace package's `exports`, that is a bigger change than it looks, and the implementer should report rather than improvise. Shipping `tsx` in the runtime image is the fallback, and it is an acceptable one — but it should be a stated decision, not a silent default.
+**Where this plan is most likely to need a decision mid-flight:** Tasks 7–13 are specified by design points and required assertions rather than complete code, unlike Tasks 1–6 and 12 and unlike Plans 1–2 throughout. That is deliberate — they assemble components Tasks 1–6 define in full — but it means their implementers make more choices inside the task than this project's implementers have been asked to make before. Where a task names a required assertion, treat it as a floor rather than a specification: add what the component actually needs, and report anything the task did not anticipate rather than quietly widening scope.
 
 **The habit that matters most in this plan.** Both previous plans' most common defect was a test that would pass with the behaviour removed. UI tests are especially prone to it — "renders without crashing" proves nothing. After each assertion, ask what you would have to break for it to go red, and where a fix rests on a guarantee, prove it by deleting the guarantee and watching the test fail.
 
