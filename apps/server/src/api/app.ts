@@ -9,10 +9,8 @@ import {
 } from "@jfstats/db";
 import type { AppEnv } from "@jfstats/shared";
 import { Hono } from "hono";
-import type Redis from "ioredis";
-import { attachRedisErrorLogger, type AppContext } from "../context.js";
-import type { Logger } from "../logger.js";
-import { LIVE_CHANNEL } from "../sync/snapshot-store.js";
+import type { AppContext } from "../context.js";
+import type { SnapshotStore } from "../sync/snapshot-store.js";
 import { requireAdmin } from "./middleware/auth.js";
 import { createRateLimiter } from "./rate-limit.js";
 import { registerAuthRoutes } from "./routes/auth.js";
@@ -31,47 +29,19 @@ export interface AppVariables {
 }
 
 /**
- * A subscribed ioredis client cannot run ordinary commands, so this duplicates
- * the shared connection rather than reusing it — sharing it would break the
- * session store on the first SSE connection.
+ * Adapts the in-process snapshot store to LiveDeps.subscribe.
  *
- * Exported so the exception-safety of the try/catch below (a duplicated
- * connection must not be leaked if the SUBSCRIBE call itself fails) can be
- * unit-tested without going through the full authenticated request path.
+ * The returned unsubscribe must not reject: registerLiveRoute invokes it from
+ * the stream's abort path, where Hono runs subscribers through `forEach` with
+ * no error handling, and an unobserved rejection terminates the process under
+ * Node's default --unhandled-rejections=throw. `off()` is synchronous and
+ * cannot throw, so the async wrapper here has nothing that can fail.
  */
-export function createLiveSubscriber(
-  redis: Redis,
-  logger: Pick<Logger, "error">,
-): LiveDeps["subscribe"] {
+export function createLiveSubscriber(snapshots: SnapshotStore): LiveDeps["subscribe"] {
   return async (onMessage) => {
-    const subscriber = redis.duplicate();
-    // Before SUBSCRIBE, so a failure during the round trip is already covered.
-    // duplicate() does not carry listeners over, and there is one of these
-    // connections per attached dashboard tab — each would otherwise fall back to
-    // ioredis's unredacted console.error.
-    attachRedisErrorLogger(subscriber, logger, "live subscriber connection error");
-    try {
-      await subscriber.subscribe(LIVE_CHANNEL);
-    } catch (error) {
-      // subscriber.duplicate() already opened the connection; if SUBSCRIBE
-      // itself fails, nothing else will ever call quit() on it.
-      await subscriber.quit();
-      throw error;
-    }
-    subscriber.on("message", (_channel, payload) => onMessage(payload));
+    const off = snapshots.subscribe((sessions) => onMessage(JSON.stringify(sessions)));
     return async () => {
-      // Swallowed here rather than at each call site. One of those call sites is
-      // the stream's abort path, where Hono invokes subscribers through forEach
-      // with no error handling — and ioredis rejects pending commands with
-      // "Connection is closed." whenever the connection has already dropped. An
-      // unobserved rejection there terminates the process under Node's default
-      // --unhandled-rejections=throw. The connection being gone is exactly the
-      // outcome quit() was called for, so there is nothing to report.
-      try {
-        await subscriber.quit();
-      } catch {
-        // already gone
-      }
+      off();
     };
   };
 }
@@ -220,7 +190,7 @@ export function createApp(context: AppContext) {
   // pattern as statsApp/historyApp/imagesApp above.
   const liveStreams = registerLiveRoute(imagesApp, {
     loadCurrent: () => context.snapshots.loadLive(),
-    subscribe: createLiveSubscriber(context.redis, context.logger),
+    subscribe: createLiveSubscriber(context.snapshots),
   });
 
   registerStaticRoutes(app, context.env.WEB_ROOT);

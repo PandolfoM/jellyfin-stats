@@ -56,7 +56,7 @@ export function createContext(env: AppEnv): AppContext {
     pool,
     redis,
     jellyfin: createJellyfinClient({ baseUrl: env.JELLYFIN_URL, apiKey: env.JELLYFIN_API_KEY }),
-    snapshots: createSnapshotStore(redis),
+    snapshots: createSnapshotStore(),
     logger,
   };
 }
