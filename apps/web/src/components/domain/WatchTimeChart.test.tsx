@@ -11,7 +11,7 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { SeriesResponse } from "../../api/queries";
-import { WatchTimeChart } from "./WatchTimeChart";
+import { type DayPoint, WatchTimeChart } from "./WatchTimeChart";
 
 beforeAll(() => {
   Object.defineProperty(HTMLElement.prototype, "offsetWidth", { configurable: true, value: 600 });
@@ -90,3 +90,27 @@ describe("WatchTimeChart", () => {
     expect(document.querySelector("svg")).not.toBeInTheDocument();
   });
 });
+
+/**
+ * Type-only compile-time guard, checked by `tsc --build` (`pnpm typecheck`)
+ * and never executed by `vitest run` — the same mechanism as the seven
+ * field-access guards in `queries.test.ts` and the four RPC-chain guards in
+ * `client.test.ts`.
+ *
+ * `WatchTimeChart.tsx` derives its tooltip's `DayPoint` type from
+ * `SeriesResponse[number]` (`type DayPoint = SeriesResponse[number]`) rather
+ * than restating the shape by hand, precisely so it can't silently drift
+ * from the wire type the way a hand-written literal did before this guard
+ * existed. This checks the derivation holds in *both* directions rather than
+ * just one: a `DayPoint` narrowed relative to `SeriesResponse[number]` (a
+ * dropped or renamed field) fails the first line below; a `DayPoint`
+ * widened relative to it (an extra field nothing in `SeriesResponse` has)
+ * fails the second. Either failure means `AssertTrue` can't resolve its
+ * argument to `true` and `pnpm typecheck` goes red — which is the direction
+ * that actually matters here, since the runtime failure mode (a stale field
+ * silently read as `undefined` in the tooltip) produces no crash and no
+ * test failure on its own.
+ */
+type AssertTrue<T extends true> = T;
+type _DayPointIsNotNarrowerThanSeriesPoint = AssertTrue<DayPoint extends SeriesResponse[number] ? true : false>;
+type _DayPointIsNotWiderThanSeriesPoint = AssertTrue<SeriesResponse[number] extends DayPoint ? true : false>;

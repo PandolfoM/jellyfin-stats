@@ -44,7 +44,9 @@ export function TopContentList({ items, loading, emptyMessage }: TopContentListP
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead className="w-14"></TableHead>
+          <TableHead className="w-14">
+            <span className="sr-only">Poster</span>
+          </TableHead>
           <TableHead>Title</TableHead>
           <TableHead>Type</TableHead>
           <TableHead className="text-right">Plays</TableHead>

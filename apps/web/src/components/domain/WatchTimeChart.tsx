@@ -21,11 +21,18 @@ export interface WatchTimeChartProps {
 
 const CHART_HEIGHT = 280;
 
-interface DayPoint {
-  day: string;
-  plays: number;
-  watchMs: number;
-}
+// Derived from the wire type rather than hand-written, so a future field
+// rename/add on `SeriesPoint` (server side) flows through to `SeriesResponse`
+// (queries.ts) and lands here automatically instead of silently drifting —
+// see `queries.test.ts`'s field-access guards and the note at the top of
+// queries.ts for why a hand-written parallel shape is this repo's most
+// expensive recurring defect. `isDayPoint` still has to exist as a *runtime*
+// guard below: Recharts hands the tooltip an untyped `payload`, so nothing
+// upstream of this file can prove at compile time that it actually matches
+// `DayPoint`. `WatchTimeChart.test.tsx` has a compile-time guard that fails
+// `pnpm typecheck` if this type alias is ever replaced with a literal that
+// diverges from `SeriesResponse[number]`.
+export type DayPoint = SeriesResponse[number];
 
 function isDayPoint(value: unknown): value is DayPoint {
   return (
