@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { formatCount, formatDay, formatDuration } from "./format";
 
 describe("formatDuration", () => {
@@ -28,6 +28,19 @@ describe("formatDuration", () => {
 });
 
 describe("formatDay", () => {
+  // Pinned to a negative-UTC-offset zone so this suite's timezone-boundary
+  // guard is deterministic. Without a pinned TZ, a regression to
+  // `new Date(day)` + local-time reads would pass silently on any
+  // UTC-or-positive-offset machine — which is what most CI runners default
+  // to — even though it fails on machines west of Greenwich.
+  beforeAll(() => {
+    vi.stubEnv("TZ", "America/Los_Angeles");
+  });
+
+  afterAll(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("renders an ISO day as a short human date", () => {
     expect(formatDay("2026-08-16")).toBe("16 Aug");
   });
