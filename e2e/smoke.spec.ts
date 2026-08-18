@@ -66,11 +66,11 @@ test.describe("authenticated smoke", () => {
   test("signs in, sees real dashboard data, survives a deep-link reload, and logs out", async ({
     page,
   }) => {
-    // Generous: this is the one test in the suite that waits on a real
-    // login round-trip against a real Jellyfin server, which can be slow
-    // (LDAP-backed Jellyfin auth, a loaded VM, a flaky network). See the
-    // SETTLE_TIMEOUT_MS comment below for why the default per-test budget
-    // isn't enough room for that plus the rest of this flow.
+    // Generous: a real Jellyfin login (LDAP-backed auth, a loaded VM, a
+    // flaky network) plus the rest of this flow can outrun the default
+    // 30s. The clear step below no longer contributes to this budget —
+    // see its own comment for why — so this mainly covers a slow
+    // `overview-route` render plus the /history reload/logout cycle.
     test.setTimeout(45_000);
 
     // Unreachable when either is unset: the describe-level test.skip above
@@ -86,42 +86,67 @@ test.describe("authenticated smoke", () => {
     await page.getByLabel("Password").fill(E2E_PASSWORD);
     await page.getByRole("button", { name: "Sign in" }).click();
 
-    // Blank both fields' DOM values before anything else runs, and wait as
-    // long as it takes (up to a generous ceiling) for that to actually
-    // succeed. The login request above already read the real credential
-    // from the DOM synchronously at submit time (login.tsx's onSubmit
-    // builds its request body from FormData before any await), so clearing
-    // the inputs now cannot affect that request.
+    // Blank both fields' raw DOM value immediately, on both the success and
+    // failure path alike, without waiting on anything. The login request
+    // above already read the real credential from the DOM synchronously at
+    // submit time (login.tsx's onSubmit builds its request body from
+    // FormData before any await), so clearing the inputs now cannot affect
+    // that request either way.
     //
-    // This has to be an inline, *awaited*, generously-timed-out clear —
-    // not a fixed-short-timeout best-effort attempt, and not a separate
-    // `afterEach` teardown — for a reason confirmed by reproduction rather
-    // than assumed: Playwright's on-failure artifacts (the screenshot and
-    // `error-context.md`, an accessibility-tree dump) are captured
-    // synchronously, inside the test body, at the instant a *later*
-    // assertion's own timeout elapses — not lazily during teardown. An
-    // earlier version of this fix used a 2000ms-bounded clear right here,
-    // verified against a fast (sub-second) rejected login; a slow real
-    // login (`login.tsx` disables both fields via `disabled={submitting}`
-    // for the whole request) can outlast 2000ms, in which case that clear
-    // silently times out and does nothing, and the *next* assertion
-    // (`overview-route` below) fails on a form that still has the real
-    // password in it. A follow-up `afterEach`-based clear was tried next
-    // and reproduced as *also* ineffective — it clears the live page, but
-    // only after the on-failure snapshot for that same test has already
-    // been written to disk. What actually closes the window: `fill("")`'s
-    // own actionability wait blocks until the (disabled-while-submitting)
-    // input is enabled again — exactly when the request settles, success
-    // or failure, however long that took — so awaiting it here, before the
-    // vulnerable assertion, means that assertion is never reached while a
-    // real credential is still sitting in the DOM.
-    const SETTLE_TIMEOUT_MS = 20_000;
-    await page.getByLabel("Username").fill("", { timeout: SETTLE_TIMEOUT_MS }).catch(() => {});
-    await page.getByLabel("Password").fill("", { timeout: SETTLE_TIMEOUT_MS }).catch(() => {});
+    // This uses a direct `.evaluate()` DOM write, not `fill("")`, and that
+    // is the actual fix, not a retuned timeout. Two earlier versions both
+    // failed empirically:
+    //   - `fill("", { timeout: 2000 })` right after click: `fill()` enforces
+    //     actionability (the target must be *enabled*), and both fields are
+    //     `disabled={submitting}` (login.tsx) for the whole request — a
+    //     login slower than 2s left the real password uncleared when the
+    //     next assertion's own failure snapshot was captured.
+    //   - Raising that same timeout to 20000ms fixed the slow-failure case
+    //     (confirmed by reproduction: a mocked 3s-delayed 401 leaked at
+    //     2000ms, did not leak at 20000ms) but broke the *success* path
+    //     instead: once login succeeds, `LoginRoute` unmounts entirely
+    //     (routes/__root.tsx's gate swap), so `fill()` finds nothing to act
+    //     on and has to poll the *full* 20000ms before giving up on each of
+    //     the two fields — ~40s of dead time on every successful run, which
+    //     was never measured because every reproduction up to that point
+    //     was a login that fails on purpose.
+    // Setting `element.value` directly needs no actionability wait at all —
+    // it works whether the element is enabled or disabled, and this locator
+    // resolves to zero elements almost immediately once the form actually
+    // unmounts, so `.count()` below returns 0 and there is nothing left to
+    // clear. Either way this step costs low-single-digit milliseconds, not
+    // a duration tied to how slow the request was. Both inputs are
+    // uncontrolled (login.tsx's own comment: "a failed submit does not
+    // clear this field"), so writing `.value` directly does not fight a
+    // React re-render that would otherwise stomp it back.
+    //
+    // Not wrapped in `.catch()`: the only realistic way this throws is the
+    // element handle going stale (the locator matched, then the element was
+    // removed from the DOM before `.evaluate()` ran) — which can only mean
+    // the form was already unmounting, i.e. nothing was left to leak in the
+    // first place. Any other failure here is unexpected enough that an
+    // aborted test — which leaks nothing, since it never proceeds to a
+    // snapshot-producing assertion with a real value still sitting in the
+    // DOM — is the correct outcome, per this project's standing rule that a
+    // failing-loud test beats a passing-quiet one that might have missed
+    // something.
+    async function clearFieldIfPresent(label: string): Promise<void> {
+      const field = page.getByLabel(label);
+      if ((await field.count()) > 0) {
+        await field.evaluate((el) => {
+          (el as HTMLInputElement).value = "";
+        });
+      }
+    }
+    await clearFieldIfPresent("Username");
+    await clearFieldIfPresent("Password");
 
-    // Successful login lands on the dashboard (the / overview route).
+    // Successful login lands on the dashboard (the / overview route). A
+    // generous timeout here (not the default 5s) is what actually accounts
+    // for a slow real login/redirect — decoupled from the clear step above,
+    // which no longer needs one at all.
     const overview = page.getByTestId("overview-route");
-    await expect(overview).toBeVisible();
+    await expect(overview).toBeVisible({ timeout: 20_000 });
 
     // The overview shows a non-zero total when the database has data.
     // Rather than asserting a hardcoded non-zero number — meaningless
