@@ -1,6 +1,6 @@
 import { MAX_TOP_ITEMS as DB_MAX_TOP_ITEMS } from "@jfstats/db";
 import type { DateRange, LibraryStat, OverviewStats, SeriesPoint, TopItem, UserDetail, UserStat } from "@jfstats/db";
-import type { Context, Env, Hono } from "hono";
+import type { Context, Env, Hono, Schema } from "hono";
 
 export interface StatsDeps {
   getOverview(range: DateRange): Promise<OverviewStats>;
@@ -74,7 +74,14 @@ export function parseRange(
   return { from, to };
 }
 
-export function registerStatsRoutes<E extends Env>(app: Hono<E>, deps: StatsDeps): void {
+/**
+ * Returns the app with these routes chained onto it (rather than `void`), the
+ * same reason registerAuthRoutes does — see that file for why. The incoming
+ * `S` is generic (not defaulted to Hono's blank schema) so that a caller
+ * threading in an already-chained app — auth's routes, here — keeps those
+ * routes in the returned type instead of them being erased at this call.
+ */
+export function registerStatsRoutes<E extends Env, S extends Schema>(app: Hono<E, S>, deps: StatsDeps) {
   const withRange = <T>(handler: (range: DateRange, c: Context<E>) => Promise<T>) =>
     async (c: Context<E>) => {
       let range: DateRange;
@@ -87,39 +94,38 @@ export function registerStatsRoutes<E extends Env>(app: Hono<E>, deps: StatsDeps
       return c.json(await handler(range, c));
     };
 
-  app.get("/api/stats/overview", withRange((range) => deps.getOverview(range)));
-  app.get("/api/stats/series", withRange((range) => deps.getWatchTimeSeries(range)));
-  app.get("/api/stats/users", withRange((range) => deps.getUserStats(range)));
-  app.get("/api/stats/libraries", withRange((range) => deps.getLibraryStats(range)));
+  return app
+    .get("/api/stats/overview", withRange((range) => deps.getOverview(range)))
+    .get("/api/stats/series", withRange((range) => deps.getWatchTimeSeries(range)))
+    .get("/api/stats/users", withRange((range) => deps.getUserStats(range)))
+    .get("/api/stats/libraries", withRange((range) => deps.getLibraryStats(range)))
+    .get(
+      "/api/stats/top-items",
+      withRange((range, c) => {
+        const requested = Number(c.req.query("limit") ?? 10);
+        const limit = Number.isFinite(requested)
+          ? Math.min(Math.max(1, Math.trunc(requested)), MAX_TOP_ITEMS)
+          : 10;
 
-  app.get(
-    "/api/stats/top-items",
-    withRange((range, c) => {
-      const requested = Number(c.req.query("limit") ?? 10);
-      const limit = Number.isFinite(requested)
-        ? Math.min(Math.max(1, Math.trunc(requested)), MAX_TOP_ITEMS)
-        : 10;
+        return deps.getTopItems(range, {
+          limit,
+          libraryId: c.req.query("libraryId"),
+          userId: c.req.query("userId"),
+        });
+      }),
+    )
+    .get("/api/stats/users/:userId", async (c) => {
+      let range: DateRange;
+      try {
+        range = parseRange(c.req.query());
+      } catch (error) {
+        if (error instanceof InvalidRangeError) return c.json({ error: "invalid_range" }, 400);
+        throw error;
+      }
 
-      return deps.getTopItems(range, {
-        limit,
-        libraryId: c.req.query("libraryId"),
-        userId: c.req.query("userId"),
-      });
-    }),
-  );
+      const detail = await deps.getUserDetail(c.req.param("userId"), range);
+      if (detail === null) return c.json({ error: "not_found" }, 404);
 
-  app.get("/api/stats/users/:userId", async (c) => {
-    let range: DateRange;
-    try {
-      range = parseRange(c.req.query());
-    } catch (error) {
-      if (error instanceof InvalidRangeError) return c.json({ error: "invalid_range" }, 400);
-      throw error;
-    }
-
-    const detail = await deps.getUserDetail(c.req.param("userId"), range);
-    if (detail === null) return c.json({ error: "not_found" }, 404);
-
-    return c.json(detail);
-  });
+      return c.json(detail);
+    });
 }

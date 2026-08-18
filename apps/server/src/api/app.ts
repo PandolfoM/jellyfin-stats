@@ -151,9 +151,9 @@ export function createApp(context: AppContext) {
   // private media library by walking item ids.
   app.use("/api/images/*", requireAdmin(sessions, cookieConfig));
 
-  // Captured (rather than the usual bare statement used for the other
-  // registerXRoutes calls below) because this is the one return value the web
-  // client's AppType is built from — see registerAuthRoutes for why.
+  // Captured, and threaded into every registerXRoutes call below, because the
+  // chained return value is what the web client's AppType is built from — see
+  // registerAuthRoutes for why a bare statement here would lose the schema.
   const routedApp = registerAuthRoutes(app, {
     authenticateByName: (u, p) => context.jellyfin.authenticateByName(u, p),
     revokeToken: (t) => context.jellyfin.revokeToken(t),
@@ -173,7 +173,13 @@ export function createApp(context: AppContext) {
         : null,
   });
 
-  registerStatsRoutes(app, {
+  // Each of these, like registerAuthRoutes above, is threaded through the
+  // previous call's returned app rather than the original `app` variable —
+  // that chaining is what lets AppType (below) see auth, stats, history,
+  // images, and live routes all together instead of only whichever call ran
+  // last. app.notFound/app.onError below don't add typed routes, so they stay
+  // on the original `app` (the same underlying instance either way).
+  const statsApp = registerStatsRoutes(routedApp, {
     getOverview: (range) => getOverview(context.db, range),
     getWatchTimeSeries: (range) => getWatchTimeSeries(context.db, range),
     getTopItems: (range, options) => getTopItems(context.db, range, options),
@@ -182,11 +188,17 @@ export function createApp(context: AppContext) {
     getLibraryStats: (range) => getLibraryStats(context.db, range),
   });
 
-  registerHistoryRoutes(app, { getHistory: (options) => getHistory(context.db, options) });
+  const historyApp = registerHistoryRoutes(statsApp, {
+    getHistory: (options) => getHistory(context.db, options),
+  });
 
-  registerImageRoutes(app, { fetchImage: createImageFetcher(context.env) });
+  const imagesApp = registerImageRoutes(historyApp, { fetchImage: createImageFetcher(context.env) });
 
-  const liveStreams = registerLiveRoute(app, {
+  // registerLiveRoute returns one object carrying both the chained app (used
+  // just below) and the LiveStreamRegistry members themselves — see that
+  // file for why this one is flattened rather than following the same
+  // pattern as statsApp/historyApp/imagesApp above.
+  const liveStreams = registerLiveRoute(imagesApp, {
     loadCurrent: () => context.snapshots.loadLive(),
     subscribe: createLiveSubscriber(context.redis, context.logger),
   });
@@ -200,7 +212,7 @@ export function createApp(context: AppContext) {
     return c.json({ error: "internal_error" }, 500);
   });
 
-  return { app: routedApp, liveStreams };
+  return { app: liveStreams.app, liveStreams };
 }
 
 export type AppType = ReturnType<typeof createApp>["app"];

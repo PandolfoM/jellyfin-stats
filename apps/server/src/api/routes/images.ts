@@ -1,4 +1,4 @@
-import type { Env, Hono } from "hono";
+import type { Env, Hono, Schema } from "hono";
 
 export interface ImageDeps {
   fetchImage(itemId: string, options: { tag?: string; maxWidth: number }): Promise<Response>;
@@ -17,8 +17,15 @@ export const CACHE_SECONDS = 60 * 60 * 24 * 30;
 // whatever path survived URL parsing instead of the intended image endpoint.
 const ITEM_ID_PATTERN = /^[0-9a-f]{32}$/i;
 
-export function registerImageRoutes<E extends Env>(app: Hono<E>, deps: ImageDeps): void {
-  app.get("/api/images/items/:itemId", async (c) => {
+/**
+ * Returns the app with this route chained onto it (rather than `void`), the
+ * same reason registerAuthRoutes does — see that file for why. The incoming
+ * `S` is generic (not defaulted to Hono's blank schema) so that a caller
+ * threading in an already-chained app keeps those routes in the returned
+ * type instead of them being erased at this call.
+ */
+export function registerImageRoutes<E extends Env, S extends Schema>(app: Hono<E, S>, deps: ImageDeps) {
+  return app.get("/api/images/items/:itemId", async (c) => {
     const itemId = c.req.param("itemId");
     if (!ITEM_ID_PATTERN.test(itemId)) {
       return c.json({ error: "invalid_item_id" }, 400);
