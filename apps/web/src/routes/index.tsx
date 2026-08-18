@@ -10,6 +10,7 @@ import { TopContentList } from "../components/domain/TopContentList";
 import { WatchTimeChart } from "../components/domain/WatchTimeChart";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { defaultRange } from "../lib/range";
+import { PanelError } from "./PanelError";
 import { rootRoute } from "./__root";
 
 // How many rows the overview's compact activity feed and top-content table
@@ -17,29 +18,6 @@ import { rootRoute } from "./__root";
 // purpose — this is a glance-at-the-dashboard summary, not a paginated view.
 const TOP_ITEMS_LIMIT = 5;
 const RECENT_ACTIVITY_LIMIT = 8;
-
-interface PanelErrorProps {
-  testId: string;
-}
-
-/**
- * A single panel's error fallback — deliberately local to this file rather
- * than a `domain/` component: it's route-layout scaffolding (mirrors
- * `SessionErrorState` in `routes/__root.tsx`), not a reusable piece of
- * dashboard content on its own. If a second route ends up needing the same
- * fallback, that's the point to promote it, not before.
- */
-function PanelError({ testId }: PanelErrorProps) {
-  return (
-    <div
-      role="alert"
-      data-testid={testId}
-      className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
-    >
-      Could not load this data. Try again.
-    </div>
-  );
-}
 
 /**
  * The dashboard landing screen. A container: it owns the four queries this
