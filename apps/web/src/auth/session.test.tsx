@@ -2,6 +2,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as unauthorizedModule from "../api/unauthorized";
 import { notifyUnauthorized } from "../api/unauthorized";
 import { SessionProvider, useSession } from "./session";
 
@@ -112,6 +113,41 @@ describe("SessionProvider", () => {
     await userEvent.click(screen.getByText("login"));
 
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
+  });
+
+  it("does not notify the shared unauthorized listener for a failed login attempt", async () => {
+    // `performLogin` checks `response.ok` directly and never calls `unwrap`
+    // — this proves that boundary holds. The concrete harm if it didn't: an
+    // already-authenticated visitor who navigates to /login and mistypes
+    // their password would flip the session to "anonymous" mid-request,
+    // and routes/__root.tsx's gate would remount login.tsx from scratch,
+    // discarding the LoginError message the user needs to see.
+    const notifySpy = vi.spyOn(unauthorizedModule, "notifyUnauthorized");
+    const loginCalls: string[] = [];
+    mockFetch((url) => {
+      if (url.includes("/api/auth/login")) {
+        loginCalls.push(url);
+        return new Response(JSON.stringify({ error: "invalid_credentials" }), { status: 401 });
+      }
+      return new Response(JSON.stringify({ userId: "u-1", userName: "admin", isAdmin: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    renderProbe();
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("authenticated"));
+
+    await userEvent.click(screen.getByText("login"));
+
+    // Proves the login request actually happened — and therefore had a real
+    // opportunity to notify — before checking the notifier's silence. A bare
+    // "status is still authenticated" check can't tell "the attempt ran and
+    // correctly didn't notify" apart from "the click never did anything",
+    // since "authenticated" was already true before the click too.
+    await waitFor(() => expect(loginCalls).toHaveLength(1));
+    expect(notifySpy).not.toHaveBeenCalled();
+    expect(screen.getByTestId("status")).toHaveTextContent("authenticated");
   });
 
   it("returns to anonymous after logout", async () => {

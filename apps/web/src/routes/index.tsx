@@ -18,21 +18,56 @@ import { rootRoute } from "./__root";
 const TOP_ITEMS_LIMIT = 5;
 const RECENT_ACTIVITY_LIMIT = 8;
 
+interface PanelErrorProps {
+  testId: string;
+}
+
+/**
+ * A single panel's error fallback — deliberately local to this file rather
+ * than a `domain/` component: it's route-layout scaffolding (mirrors
+ * `SessionErrorState` in `routes/__root.tsx`), not a reusable piece of
+ * dashboard content on its own. If a second route ends up needing the same
+ * fallback, that's the point to promote it, not before.
+ */
+function PanelError({ testId }: PanelErrorProps) {
+  return (
+    <div
+      role="alert"
+      data-testid={testId}
+      className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
+    >
+      Could not load this data. Try again.
+    </div>
+  );
+}
+
 /**
  * The dashboard landing screen. A container: it owns the four queries this
  * page needs and the range state that drives all of them, and passes plain
- * resolved data down to props-only domain components — no formatting, no
- * empty/loading branching beyond picking which component to render, lives
- * here.
+ * resolved data down to props-only domain components — no formatting beyond
+ * deciding, per panel, whether to render that panel's error state (its
+ * loading state is already owned by the domain component itself via
+ * `loading`).
+ *
+ * Errors are handled per panel, not for the whole route: a 500 on one query
+ * (say, `/api/history`) must not blank the stat cards, chart, and
+ * top-content list that loaded fine — those three already have real data to
+ * show. Each of the four sections below checks only its own query's
+ * `isError`, independently of the other three.
  *
  * A 401 from any of the four queries is deliberately *not* handled here.
- * `unwrap` (api/client.ts) notifies a shared listener on every 401 it sees,
- * and `SessionProvider` (auth/session.tsx) is the one subscriber — it flips
- * to "anonymous", and the protected-route gate in `routes/__root.tsx`
- * redirects to `/login` on its own. Handling it per-route would mean
- * repeating the same `error.status === 401` check in this route and the four
- * that follow it; centralizing it once in the session layer means none of
- * them have to.
+ * `unwrap` (api/client.ts) calls the shared `notifyUnauthorized()` listener
+ * synchronously, immediately before it throws, for every 401 it sees;
+ * `SessionProvider` (auth/session.tsx) is the one subscriber, and flips the
+ * session to "anonymous" the moment that fires. That ordering is *why* a
+ * panel error that survives long enough to actually render here is never a
+ * 401 — by the time a 401 would reach this component as a query error, the
+ * session has already flipped and `routes/__root.tsx`'s gate is already
+ * redirecting away (a rendering-order guarantee, not a status-code check
+ * performed in this file). Handling 401 per-route instead would mean
+ * repeating the same `error.status === 401` check in this route and the
+ * four that follow it; centralizing it once in the session layer means none
+ * of them have to.
  */
 function Overview() {
   const [range, setRange] = useState(() => defaultRange());
@@ -44,14 +79,6 @@ function Overview() {
     historyQuery({ from: range.from, to: range.to, limit: RECENT_ACTIVITY_LIMIT }),
   );
 
-  // Any error still active here is, by construction, not a 401 — a 401
-  // already redirected the whole app to /login before this could render an
-  // error card for it (see the note above). What's left is a genuine server
-  // fault (500, network failure, etc.), which the previous task's
-  // SessionErrorState pattern this mirrors treats as "something is actually
-  // broken," not "log in again."
-  const hasError = [overview, series, topItems, history].some((query) => query.isError);
-
   return (
     <div data-testid="overview-route" className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -59,48 +86,52 @@ function Overview() {
         <DateRangePicker value={range} onChange={setRange} />
       </div>
 
-      {hasError ? (
-        <div
-          role="alert"
-          data-testid="overview-error"
-          className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
-        >
-          Could not load dashboard data. Try again.
-        </div>
+      {overview.isError ? (
+        <PanelError testId="overview-error" />
       ) : (
-        <>
-          <StatCardRow stats={overview.data ?? null} loading={overview.isLoading} />
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Watch time</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <WatchTimeChart points={series.data ?? []} loading={series.isLoading} />
-            </CardContent>
-          </Card>
-
-          <div className="grid gap-6 lg:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Top content</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <TopContentList items={topItems.data ?? []} loading={topItems.isLoading} />
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Recent activity</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ActivityFeed rows={history.data?.rows ?? []} loading={history.isLoading} />
-              </CardContent>
-            </Card>
-          </div>
-        </>
+        <StatCardRow stats={overview.data ?? null} loading={overview.isLoading} />
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Watch time</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {series.isError ? (
+            <PanelError testId="series-error" />
+          ) : (
+            <WatchTimeChart points={series.data ?? []} loading={series.isLoading} />
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Top content</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {topItems.isError ? (
+              <PanelError testId="top-items-error" />
+            ) : (
+              <TopContentList items={topItems.data ?? []} loading={topItems.isLoading} />
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Recent activity</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {history.isError ? (
+              <PanelError testId="history-error" />
+            ) : (
+              <ActivityFeed rows={history.data?.rows ?? []} loading={history.isLoading} />
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

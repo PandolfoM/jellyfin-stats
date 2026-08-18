@@ -114,6 +114,17 @@ async function resolveSession(): Promise<SessionState> {
  * failure it throws a `LoginError` carrying which of the API's four failure
  * codes occurred, so the login screen can render a specific remedy instead of
  * a generic "login failed".
+ *
+ * Checks `response.ok` directly instead of going through `unwrap` — this is
+ * deliberate, not an oversight: a wrong password here must never call
+ * `notifyUnauthorized`. `login.tsx` holds the resulting `LoginErrorCode` in
+ * its own component-local state, and the login form is reachable while
+ * already authenticated (a signed-in visitor can navigate to /login). If a
+ * mistyped password here flipped the session to "anonymous" the same way a
+ * stats/history 401 does, `routes/__root.tsx`'s gate would swap
+ * `AppShell > Outlet` for a bare `Outlet` mid-request, remounting `login.tsx`
+ * from scratch and discarding the very error message this request exists to
+ * show the user.
  */
 async function performLogin(
   username: string,
@@ -144,13 +155,26 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // A 401 from any *other* protected route (stats, history, images, live —
-  // not just /api/auth/me above) means the session expired or was revoked
-  // after this page already loaded. Treating it identically to the bootstrap
-  // 401 — flip to "anonymous", never "error" — is what lets the
-  // protected-route gate in routes/__root.tsx redirect to /login on its own,
-  // instead of every data-fetching route needing its own 401 check to avoid
-  // rendering an error card for what is actually a login prompt.
+  // Covers every query that funnels through `unwrap` (api/client.ts) — today
+  // that's the stats and history routes queries.ts calls, and any future
+  // route that follows that same `unwrap`-wrapped pattern. A 401 from any of
+  // them means the session expired or was revoked after this page already
+  // loaded; treating it identically to the bootstrap 401 above — flip to
+  // "anonymous", never "error" — is what lets the protected-route gate in
+  // routes/__root.tsx redirect to /login on its own, instead of every
+  // data-fetching route needing its own 401 check.
+  //
+  // This does NOT cover every protected request in the app, and a future
+  // route cannot assume it does:
+  //   - `PosterImage` (components/domain/PosterImage.tsx) renders a plain
+  //     `<img src="/api/images/items/...">`. An `<img>` load never goes
+  //     through `unwrap` — a 401 there degrades to PosterImage's own
+  //     broken-image placeholder, not a redirect.
+  //   - Nothing under apps/web/src uses `EventSource` yet, but when a
+  //     server-sent-events route (the Live screen) is built, its connection
+  //     will not go through `unwrap` either — SSE has no `Response` for
+  //     `unwrap` to inspect. A 401 on an SSE handshake needs its own
+  //     explicit handling in that route; this subscription will not save it.
   useEffect(() => subscribeUnauthorized(() => setState(ANONYMOUS_STATE)), []);
 
   // The password is never stored — it lives only as a parameter here, passed

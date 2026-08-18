@@ -127,7 +127,9 @@ describe("Overview route", () => {
     await waitFor(() => expect(countCalls(calls, "/api/history")).toBeGreaterThanOrEqual(1));
 
     const originalFrom = paramsFor(calls, "/api/stats/overview")?.get("from");
+    const originalTo = paramsFor(calls, "/api/stats/overview")?.get("to");
     expect(originalFrom).toBeTruthy();
+    expect(originalTo).toBeTruthy();
 
     // Shifted relative to whatever the picker's own initial value is (real
     // "today", not a value this test controls), so the assertion holds no
@@ -157,6 +159,16 @@ describe("Overview route", () => {
     expect(paramsFor(calls, "/api/stats/series")?.get("from")).toBe(shiftedFrom);
     expect(paramsFor(calls, "/api/stats/top-items")?.get("from")).toBe(shiftedFrom);
     expect(paramsFor(calls, "/api/history")?.get("from")).toBe(shiftedFrom);
+
+    // Only `from` was edited — `to` must survive unchanged. An `onChange`
+    // handler that rebuilt the range from a default instead of merging with
+    // the picker's current value (e.g. `setRange(defaultRange())`) would
+    // still move `from` somewhere and pass every assertion above, but would
+    // clobber `to` with today's date in the process.
+    expect(paramsFor(calls, "/api/stats/overview")?.get("to")).toBe(originalTo);
+    expect(paramsFor(calls, "/api/stats/series")?.get("to")).toBe(originalTo);
+    expect(paramsFor(calls, "/api/stats/top-items")?.get("to")).toBe(originalTo);
+    expect(paramsFor(calls, "/api/history")?.get("to")).toBe(originalTo);
   });
 
   it("renders resolved data from all four queries", async () => {
@@ -205,7 +217,28 @@ describe("Overview route", () => {
 
     expect(await screen.findByText("42")).toBeInTheDocument(); // plays, from StatCardRow
     expect(await screen.findAllByText("Example Movie One")).toHaveLength(2); // top content + activity feed
+
+    // Wait for every panel's loading skeleton to clear — not just the two
+    // panels asserted on above — before checking `series`'s effect below.
+    // Without this, a `series` query that was still mid-flight would also
+    // show no "No watch time yet" text (WatchTimeChart renders a Skeleton
+    // while loading, not the empty state), which would make that check pass
+    // vacuously regardless of whether the series data ever arrived.
+    await waitFor(() => expect(document.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(0));
+
+    // `series` specifically: WatchTimeChart renders its EmptyState ("No
+    // watch time yet") if and only if `points.length === 0`. The mocked
+    // response above has one point, so this text's absence — now that
+    // loading has definitely finished — is what proves the series response
+    // actually reached the chart. A route that dropped the `series` query
+    // and passed `[]` to `WatchTimeChart` would pass every assertion above
+    // unchanged but show this text.
+    expect(screen.queryByText("No watch time yet")).not.toBeInTheDocument();
+
     expect(screen.queryByTestId("overview-error")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("series-error")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("top-items-error")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("history-error")).not.toBeInTheDocument();
   });
 
   it("redirects to /login instead of rendering an error card when a query gets a 401", async () => {
@@ -228,5 +261,44 @@ describe("Overview route", () => {
     expect(await screen.findByTestId("overview-error")).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/");
     expect(screen.queryByLabelText("Username")).not.toBeInTheDocument();
+  });
+
+  it("shows only the failing panel's error, and still renders the other three panels' data", async () => {
+    // Only `history` fails here; the other three get real, distinguishable
+    // data — a route that blanked the whole dashboard on any single query
+    // error (the pre-fix behavior) would fail this by never rendering "42"
+    // or "Example Movie One" at all, not just by mislabeling the error.
+    mockFetch({
+      overview: () => jsonResponse({ plays: 42, watchMs: 7_265_000, activeUsers: 3, activeItems: 12 }),
+      series: () => jsonResponse([{ day: "2026-01-01", plays: 2, watchMs: 120_000 }]),
+      topItems: () =>
+        jsonResponse([
+          {
+            itemId: "item-1",
+            name: "Example Movie One",
+            type: "Movie",
+            libraryId: "library-a",
+            seriesId: null,
+            imageTag: null,
+            plays: 5,
+            watchMs: 3_600_000,
+          },
+        ]),
+      history: () => new Response(JSON.stringify({ error: "internal_error" }), { status: 500 }),
+    });
+
+    renderOverview();
+
+    expect(await screen.findByTestId("history-error")).toBeInTheDocument();
+    expect(await screen.findByText("42")).toBeInTheDocument(); // StatCardRow, from `overview`
+    expect(await screen.findByText("Example Movie One")).toBeInTheDocument(); // TopContentList, from `topItems`
+
+    await waitFor(() => expect(document.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(0));
+    expect(screen.queryByText("No watch time yet")).not.toBeInTheDocument(); // WatchTimeChart, from `series`
+
+    // The three healthy panels must not show an error of their own.
+    expect(screen.queryByTestId("overview-error")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("series-error")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("top-items-error")).not.toBeInTheDocument();
   });
 });

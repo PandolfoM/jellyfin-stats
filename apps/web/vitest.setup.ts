@@ -13,3 +13,13 @@ import { afterEach } from "vitest";
 afterEach(() => {
   cleanup();
 });
+
+// jsdom has no layout engine and does not implement `window.scrollTo` —
+// TanStack Router calls it for scroll restoration on every navigation, which
+// otherwise prints "Not implemented: Window's scrollTo() method" to stderr
+// once per navigation in every test that renders a router. A no-op is the
+// correct behavior for jsdom anyway (there is no scroll position to restore),
+// not just a way to silence the noise.
+if (typeof window !== "undefined") {
+  window.scrollTo = () => {};
+}
