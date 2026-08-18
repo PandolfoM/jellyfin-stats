@@ -72,10 +72,14 @@ export function DateRangePicker({ value, onChange, presets, className }: DateRan
         </div>
       )}
       <div className="flex items-center gap-2">
-        <label htmlFor="date-range-from" className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        {/* No `id`/`htmlFor` pair: the input is nested inside its `<label>`,
+            which associates them for accessibility on its own. A literal id
+            would collide the moment two pickers render on the same page —
+            invalid HTML, and this component's own tests would start failing
+            with "found multiple elements" the moment they rendered twice. */}
+        <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
           From
           <input
-            id="date-range-from"
             type="date"
             value={value.from}
             max={value.to}
@@ -83,10 +87,9 @@ export function DateRangePicker({ value, onChange, presets, className }: DateRan
             className={fieldClassName}
           />
         </label>
-        <label htmlFor="date-range-to" className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
           To
           <input
-            id="date-range-to"
             type="date"
             value={value.to}
             min={value.from}

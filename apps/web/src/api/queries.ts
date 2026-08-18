@@ -8,13 +8,23 @@ import { api, unwrap } from "./client";
 // therefore from the server's actual handlers) rather than re-declared here —
 // see the note at the top of client.ts. If a server route's response shape
 // changes, these types change with it instead of silently drifting.
-type OverviewResponse = InferResponseType<typeof api.api.stats.overview.$get>;
-type SeriesResponse = InferResponseType<typeof api.api.stats.series.$get>;
-type TopItemsResponse = InferResponseType<(typeof api.api.stats)["top-items"]["$get"]>;
-type UserStatsResponse = InferResponseType<typeof api.api.stats.users.$get>;
-type UserDetailResponse = InferResponseType<(typeof api.api.stats.users)[":userId"]["$get"]>;
-type LibraryStatsResponse = InferResponseType<typeof api.api.stats.libraries.$get>;
-type HistoryResponse = InferResponseType<typeof api.api.history.$get>;
+//
+// The explicit `, 200` on every one of these pins `InferResponseType` to the
+// route's success body. Without it, `InferResponseType` defaults to *all*
+// status codes the handler can return — including each route's `{ error:
+// string }` 400 body — so the type would be a union that doesn't have
+// `plays`/`length`/etc. on it at all. `unwrap` throws on any non-2xx
+// response (client.ts), so that error member can never actually reach a
+// caller at runtime; pinning to 200 here makes the static type match what
+// callers actually receive. `queries.test.ts` has a compile-time guard that
+// fails `pnpm typecheck` if this pin is ever dropped.
+type OverviewResponse = InferResponseType<typeof api.api.stats.overview.$get, 200>;
+type SeriesResponse = InferResponseType<typeof api.api.stats.series.$get, 200>;
+type TopItemsResponse = InferResponseType<(typeof api.api.stats)["top-items"]["$get"], 200>;
+type UserStatsResponse = InferResponseType<typeof api.api.stats.users.$get, 200>;
+type UserDetailResponse = InferResponseType<(typeof api.api.stats.users)[":userId"]["$get"], 200>;
+type LibraryStatsResponse = InferResponseType<typeof api.api.stats.libraries.$get, 200>;
+type HistoryResponse = InferResponseType<typeof api.api.history.$get, 200>;
 
 export interface TopItemsOptions {
   limit?: number;

@@ -4,7 +4,7 @@
 // out, no fetching — so every test here drives it purely through props and
 // DOM events, the same shape AppShell.test.tsx uses for its own props-only
 // component.
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DateRangePicker } from "./DateRangePicker";
@@ -117,5 +117,40 @@ describe("DateRangePicker", () => {
         86_400_000 +
       1;
     expect(spanDays).toBe(1000);
+  });
+
+  it("supports two instances on the same page without id collisions or cross-talk", () => {
+    // This is the control's actual reuse case — six later tasks compose it
+    // into their own screens, and nothing stops two of those screens (or two
+    // copies of the same screen) from mounting at once. A literal `id` on the
+    // inputs would collide the moment that happens: invalid HTML, and
+    // `getByLabelText` starts throwing "found multiple elements" instead of
+    // resolving to one field.
+    const onChangeA = vi.fn();
+    const onChangeB = vi.fn();
+    const { container } = render(
+      <>
+        <div data-testid="picker-a">
+          <DateRangePicker value={VALUE} onChange={onChangeA} />
+        </div>
+        <div data-testid="picker-b">
+          <DateRangePicker value={{ from: "2026-02-01", to: "2026-02-28" }} onChange={onChangeB} />
+        </div>
+      </>,
+    );
+
+    const ids = Array.from(container.querySelectorAll("[id]")).map((el) => el.id);
+    expect(new Set(ids).size).toBe(ids.length);
+
+    const pickerA = within(screen.getByTestId("picker-a"));
+    const pickerB = within(screen.getByTestId("picker-b"));
+
+    fireEvent.change(pickerA.getByLabelText("From"), { target: { value: "2026-01-15" } });
+    fireEvent.change(pickerB.getByLabelText("To"), { target: { value: "2026-02-20" } });
+
+    expect(onChangeA).toHaveBeenCalledTimes(1);
+    expect(onChangeA).toHaveBeenCalledWith({ from: "2026-01-15", to: "2026-01-31" });
+    expect(onChangeB).toHaveBeenCalledTimes(1);
+    expect(onChangeB).toHaveBeenCalledWith({ from: "2026-02-01", to: "2026-02-20" });
   });
 });
