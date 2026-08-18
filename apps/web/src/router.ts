@@ -3,8 +3,12 @@ import { createRoute, createRouter, type RouterHistory } from "@tanstack/react-r
 import { rootRoute } from "./routes/__root";
 import { historyRoute } from "./routes/history";
 import { indexRoute } from "./routes/index";
+import { librariesRoute } from "./routes/libraries";
+import { libraryDetailRoute } from "./routes/libraries.$libraryId";
 import { liveRoute } from "./routes/live";
 import { LoginRoute } from "./routes/login";
+import { usersRoute } from "./routes/users";
+import { userDetailRoute } from "./routes/users.$userId";
 
 export const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -12,7 +16,16 @@ export const loginRoute = createRoute({
   component: LoginRoute,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, liveRoute, historyRoute, loginRoute]);
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  liveRoute,
+  historyRoute,
+  usersRoute,
+  userDetailRoute,
+  librariesRoute,
+  libraryDetailRoute,
+  loginRoute,
+]);
 
 /**
  * Builds a router from the app's one route tree. `main.tsx` and the guard
@@ -29,3 +42,38 @@ export function createAppRouter(history?: RouterHistory) {
 }
 
 export type AppRouter = ReturnType<typeof createAppRouter>;
+
+/**
+ * `RoutePaths<TRouteTree>` — the utility TanStack Router itself uses to
+ * type a `<Link to="...">` — is only exported from `@tanstack/router-core`,
+ * not re-exported from `@tanstack/react-router`'s public entry point, and
+ * `router-core` is not a direct dependency of this package (pnpm's isolated
+ * node_modules means it is not even resolvable from here — see this task's
+ * report for how that was confirmed). So the registered-path union below is
+ * built from each route object's own `fullPath`, which *is* public: every
+ * `createRoute({ path: "..." })` call infers a literal string type for that
+ * route's `fullPath` the same way it would for `RoutePaths`, since every
+ * route in this tree is a direct child of the root with no explicit `id`
+ * override.
+ *
+ * `/settings` (Task 11) is deliberately absent — that route file does not
+ * exist yet, so it cannot appear in `routeTree` or this union. See
+ * `AppShell.tsx`'s `NavItem.to` for how that gap is carried forward
+ * explicitly instead of silently, and this task's report for the full
+ * reasoning.
+ */
+export type AppRoutePath =
+  | typeof indexRoute.fullPath
+  | typeof liveRoute.fullPath
+  | typeof historyRoute.fullPath
+  | typeof usersRoute.fullPath
+  | typeof userDetailRoute.fullPath
+  | typeof librariesRoute.fullPath
+  | typeof libraryDetailRoute.fullPath
+  | typeof loginRoute.fullPath;
+
+declare module "@tanstack/react-router" {
+  interface Register {
+    router: AppRouter;
+  }
+}

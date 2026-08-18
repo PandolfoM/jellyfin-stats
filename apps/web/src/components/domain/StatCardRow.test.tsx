@@ -47,4 +47,32 @@ describe("StatCardRow", () => {
     expect(screen.getByText("Active users")).toBeInTheDocument();
     expect(screen.getByText("Active items")).toBeInTheDocument();
   });
+
+  // Task 10's user- and library-detail routes pass only `plays`/`watchMs` —
+  // neither `getUserDetail` nor `getLibraryStats` has anything resembling
+  // "active users" or "active items" for a single user/library. A component
+  // that still rendered those two tiles with some fabricated or leftover
+  // number would silently show a wrong metric on both detail pages.
+  it("renders only the tiles for fields that are present, omitting the rest entirely", () => {
+    render(<StatCardRow stats={{ plays: 7, watchMs: 90_000 }} loading={false} />);
+
+    expect(screen.getByText("Plays")).toBeInTheDocument();
+    expect(screen.getByText("7")).toBeInTheDocument();
+    expect(screen.getByText("Watch time")).toBeInTheDocument();
+    expect(screen.getByText("1m")).toBeInTheDocument();
+    expect(screen.queryByText("Active users")).not.toBeInTheDocument();
+    expect(screen.queryByText("Active items")).not.toBeInTheDocument();
+    expect(document.querySelectorAll('[data-slot="card"]')).toHaveLength(2);
+  });
+
+  it("renders zeros (not omitted) for plays/watchMs specifically, even though other fields are omitted", () => {
+    render(<StatCardRow stats={{ plays: 0, watchMs: 0 }} loading={false} />);
+
+    // Two "Plays"/"Watch time" tiles showing real zeros — distinct from the
+    // "stats is null" case above, which falls back to a full four-tile
+    // ZERO_STATS. A partial object with zero values must still render
+    // exactly its two tiles, not fall back to all four.
+    expect(document.querySelectorAll('[data-slot="card"]')).toHaveLength(2);
+    expect(screen.getByText("0m")).toBeInTheDocument();
+  });
 });

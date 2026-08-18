@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { Clock, LayoutDashboard, Library, LogOut, Radio, Settings, Users } from "lucide-react";
 import type { ReactNode } from "react";
 
+import type { AppRoutePath } from "../../router";
 import { Button, buttonVariants } from "../ui/button";
 import { cn } from "../../lib/cn";
 
@@ -13,7 +14,26 @@ export interface AppShellProps {
 
 interface NavItem {
   label: string;
-  to: string;
+  /**
+   * `AppRoutePath` (router.ts) rather than `string` — this is what makes
+   * `Register` (also router.ts) actually catch something: a `Link to={item.to}`
+   * fed a bare `string` type-checks against any `to` prop, registered router
+   * or not, because a non-literal `string` can't be validated against a
+   * literal union at all. Narrowing this to the real registered paths is
+   * what makes a typo'd `to` here (or a route renamed in router.ts without
+   * updating this list) fail `pnpm typecheck` instead of silently 404ing at
+   * runtime — the entire reason `Register` was deferred until routes with
+   * real path literals existed to register against.
+   *
+   * `| "/settings"` is unioned in by hand, not derived from `AppRoutePath`,
+   * because `/settings` (Task 11) has no route file yet and so cannot appear
+   * in `router.ts`'s route tree or `AppRoutePath`. This is a deliberate,
+   * documented gap, not an oversight: the alternative — leaving this whole
+   * field as `string` — would silently defeat the narrowing for all six
+   * items, not just this one. Task 11 should drop this manual union member
+   * once `/settings` has a real route and is folded into `AppRoutePath`.
+   */
+  to: AppRoutePath | "/settings";
   icon: typeof LayoutDashboard;
 }
 
@@ -50,7 +70,15 @@ export function AppShell({ userName, onLogout, children }: AppShellProps) {
             return (
               <Link
                 key={item.to}
-                to={item.to}
+                // `Register`'s route-path union (router.ts) does not include
+                // "/settings" — that route doesn't exist until Task 11, so it
+                // cannot be part of the real registered tree. This is the one
+                // narrow, explained exception to real path-checking on this
+                // list: every other value flowing through `item.to` (its
+                // type, `NavItem.to` above, still rejects a typo in any of
+                // them) is validated against the actual registered routes.
+                // Task 11 should remove this cast once `/settings` is real.
+                to={item.to as AppRoutePath}
                 className={navLinkClassName}
                 activeOptions={{ exact: item.to === "/" }}
                 activeProps={{ className: cn(navLinkClassName, "bg-secondary text-secondary-foreground") }}
