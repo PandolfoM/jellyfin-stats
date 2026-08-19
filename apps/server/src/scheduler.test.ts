@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import type { AppContext } from "./context.js";
 import {
   buildSchedules,
+  FAILURE_BACKOFF_MS,
   handle,
   rollupWindow,
   runDueJobs,
@@ -204,6 +205,7 @@ describe("runDueJobs", () => {
       writeRun,
       logger: fakeLogger(),
       inFlight,
+      lastAttemptAt: new Map(),
     };
     const runs = runsWithOnlyDue(TARGET);
 
@@ -237,6 +239,7 @@ describe("runDueJobs", () => {
       writeRun,
       logger: fakeLogger(),
       inFlight,
+      lastAttemptAt: new Map(),
     };
     // writeRun is never called on failure, so this same "never ran" runs map
     // is still accurate on the second tick — the job is still due.
@@ -262,6 +265,7 @@ describe("runDueJobs", () => {
       writeRun,
       logger,
       inFlight,
+      lastAttemptAt: new Map(),
     };
     const runs = runsWithOnlyDue(TARGET);
 
@@ -285,6 +289,7 @@ describe("runDueJobs", () => {
       writeRun,
       logger,
       inFlight,
+      lastAttemptAt: new Map(),
     };
     const runs = runsWithOnlyDue(TARGET);
 
@@ -423,5 +428,235 @@ describe("startScheduler", () => {
     expect(stopped).toBe(true);
     // And no tick sneaked in during the drain either.
     expect(readRuns.mock.calls.length).toBe(readRunsCallsBeforeStop);
+  });
+
+  it("defaults to ticking at most every 1s, faster than the shortest interval it schedules (finding 3)", async () => {
+    const readRuns = vi.fn().mockResolvedValue(new Map<string, Date>());
+    const writeRun = vi.fn().mockResolvedValue(undefined);
+    const runJob = vi.fn().mockResolvedValue(undefined);
+    const context = { env: FAKE_ENV, logger: { error: vi.fn() } } as unknown as AppContext;
+
+    // tickMs deliberately not passed, to exercise the real default.
+    const scheduler = startScheduler(context, { runJob, readRuns, writeRun });
+    await vi.advanceTimersByTimeAsync(3000);
+    await scheduler.stop();
+
+    // SESSION_POLL_INTERVAL_MS is 5000 here; ticking at that cadence (the old
+    // default, which is what let read-latency jitter skip a whole interval —
+    // see the "tick timing" tests below) would call readRuns once in 3s.
+    // Ticking at the 1s floor calls it three times.
+    expect(readRuns.mock.calls.length).toBe(3);
+  });
+});
+
+// --- runDueJobs: failure backoff (finding 4) --------------------------------
+//
+// Before this fix, a failing job retried on literally every tick forever:
+// writeRun is skipped on failure, so lastRunAt in job_runs never advances, and
+// isDue keeps comparing against that same stale timestamp -- once a job
+// becomes due it stays "due" on every subsequent tick until it finally
+// succeeds. These tests fail under that old behavior (no lastAttemptAt
+// tracked, no backoff check) because callsWithinFloor would be 3, not 1.
+
+describe("runDueJobs backoff on repeated failure", () => {
+  const BACKOFF_TARGET: JobName = "reference-sync";
+
+  it("does not retry a failing non-session-poll job again until the backoff floor elapses", async () => {
+    const runJob = vi.fn().mockRejectedValue(new Error("boom"));
+    const writeRun = vi.fn().mockResolvedValue(undefined);
+    const logger = fakeLogger();
+    const inFlight = new Map<JobName, Promise<void>>();
+    const lastAttemptAt = new Map<JobName, number>();
+    const deps: SchedulerDeps = {
+      schedules: NEVER_DUE_SCHEDULES,
+      runJob,
+      writeRun,
+      logger,
+      inFlight,
+      lastAttemptAt,
+    };
+    const runs = runsWithOnlyDue(BACKOFF_TARGET);
+
+    await runDueJobs(deps, runs, FIXED_NOW);
+    await waitUntilIdle(inFlight, BACKOFF_TARGET);
+
+    // Two more ticks, seconds apart -- like the real scheduler's cadence --
+    // while still well inside FAILURE_BACKOFF_MS.
+    await runDueJobs(deps, runs, FIXED_NOW + 5_000);
+    await waitUntilIdle(inFlight, BACKOFF_TARGET);
+    await runDueJobs(deps, runs, FIXED_NOW + 10_000);
+    await waitUntilIdle(inFlight, BACKOFF_TARGET);
+
+    const callsWithinFloor = runJob.mock.calls.filter(([name]) => name === BACKOFF_TARGET).length;
+    expect(callsWithinFloor).toBe(1);
+
+    // Once the floor elapses, the job is attempted again.
+    await runDueJobs(deps, runs, FIXED_NOW + FAILURE_BACKOFF_MS + 1);
+    await waitUntilIdle(inFlight, BACKOFF_TARGET);
+
+    const callsAfterFloor = runJob.mock.calls.filter(([name]) => name === BACKOFF_TARGET).length;
+    expect(callsAfterFloor).toBe(2);
+  });
+
+  it("keeps retrying a failing session-poll on every tick (fast retry preserved)", async () => {
+    const runJob = vi.fn().mockRejectedValue(new Error("boom"));
+    const writeRun = vi.fn().mockResolvedValue(undefined);
+    const logger = fakeLogger();
+    const inFlight = new Map<JobName, Promise<void>>();
+    const lastAttemptAt = new Map<JobName, number>();
+    const deps: SchedulerDeps = {
+      schedules: NEVER_DUE_SCHEDULES,
+      runJob,
+      writeRun,
+      logger,
+      inFlight,
+      lastAttemptAt,
+    };
+    const runs = runsWithOnlyDue(TARGET); // TARGET === "session-poll"
+
+    await runDueJobs(deps, runs, FIXED_NOW);
+    await waitUntilIdle(inFlight, TARGET);
+    await runDueJobs(deps, runs, FIXED_NOW + 5_000);
+    await waitUntilIdle(inFlight, TARGET);
+    await runDueJobs(deps, runs, FIXED_NOW + 10_000);
+    await waitUntilIdle(inFlight, TARGET);
+
+    // session-poll is deliberately exempt from FAILURE_BACKOFF_MS -- all
+    // three ticks, well within the floor, still attempted it.
+    expect(runJob.mock.calls.filter(([name]) => name === TARGET).length).toBe(3);
+  });
+});
+
+// --- runDueJobs: global concurrency (finding 5) -----------------------------
+//
+// Restores BullMQ's `concurrency: 1`: at most one job runs at a time across
+// the whole scheduler, not one slot per job name. Without this, two jobs due
+// on the same tick would both dispatch.
+
+describe("runDueJobs global concurrency", () => {
+  it("dispatches at most one job per tick even when several are due at once", async () => {
+    const started: JobName[] = [];
+    let resolveFirst: (() => void) | undefined;
+    const runJob = vi.fn((name: JobName) => {
+      started.push(name);
+      return new Promise<void>((resolve) => {
+        resolveFirst = resolve;
+      });
+    });
+    const writeRun = vi.fn().mockResolvedValue(undefined);
+    const inFlight = new Map<JobName, Promise<void>>();
+    const lastAttemptAt = new Map<JobName, number>();
+    const deps: SchedulerDeps = {
+      schedules: NEVER_DUE_SCHEDULES,
+      runJob,
+      writeRun,
+      logger: fakeLogger(),
+      inFlight,
+      lastAttemptAt,
+    };
+    // Every job is due: none has ever run.
+    const runs = new Map<string, Date>();
+
+    await runDueJobs(deps, runs, FIXED_NOW);
+
+    // Only the first job in JOB_NAMES order was started; the rest are left
+    // for later ticks once the slot frees up.
+    expect(started).toEqual([JOB_NAMES[0]]);
+    expect(inFlight.size).toBe(1);
+
+    resolveFirst?.();
+    await waitUntilIdle(inFlight, started[0] as JobName);
+  });
+});
+
+// --- startScheduler: tick timing (finding 3) --------------------------------
+//
+// Reproduces, without depending on real elapsed wall-clock time, the timing
+// model of the real tick() loop: the interval timer fires on a fixed
+// cadence independent of how long the previous tick's async work took (it is
+// fire-and-forget, `void tick()`), but `now()` is sampled only *after*
+// readRuns() resolves. So the gap between two recorded run times is
+// `tickIntervalMs + thisReadLatency`, measured from the fixed firing
+// schedule -- not simply `tickIntervalMs` apart. `buildTimingHarness` bakes
+// exactly that model into a controllable `now` and a `readRuns` whose
+// latency varies per call, with no real timers or delays involved.
+
+describe("startScheduler tick timing (finding 3)", () => {
+  const FAKE_ENV = {
+    SESSION_POLL_INTERVAL_MS: 5000,
+    REFERENCE_SYNC_INTERVAL_MS: 900_000,
+  } as unknown as AppEnv;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function buildTimingHarness(tickIntervalMs: number, readLatenciesMs: readonly number[]) {
+    let simulatedNow = 0;
+    let callIndex = 0;
+    const runsStore = new Map<string, Date>();
+    const readRuns = vi.fn(async () => {
+      callIndex += 1;
+      // The timer's Nth fire happens at a fixed point (N * tickIntervalMs)
+      // regardless of prior tick durations; this read's own latency is what
+      // delays *this* call's resolution past that point.
+      simulatedNow = callIndex * tickIntervalMs + (readLatenciesMs[callIndex - 1] ?? 0);
+      return new Map(runsStore);
+    });
+    const writeRun = vi.fn(async (name: JobName, at: Date) => {
+      runsStore.set(name, at);
+    });
+    return { readRuns, writeRun, now: () => simulatedNow };
+  }
+
+  it("skips session-poll for a whole extra interval when tickMs equals the interval (old default) and read latency shrinks between ticks", async () => {
+    const runJob = vi.fn().mockResolvedValue(undefined);
+    // First read is slow (50ms), second is instant -- read latency shrinking
+    // between ticks is exactly what makes the recorded gap dip below everyMs.
+    const { readRuns, writeRun, now } = buildTimingHarness(5000, [50, 0]);
+    const context = { env: FAKE_ENV, logger: { error: vi.fn() } } as unknown as AppContext;
+
+    // tickMs: 5000 reproduces the pre-fix default (tickMs === SESSION_POLL_INTERVAL_MS).
+    const scheduler = startScheduler(context, { runJob, readRuns, writeRun, now, tickMs: 5000 });
+
+    await vi.advanceTimersByTimeAsync(5000); // tick 1: never run before -> due
+    await vi.advanceTimersByTimeAsync(5000); // tick 2: recorded gap is 4950ms < 5000ms -> skipped
+    await scheduler.stop();
+
+    const pollCalls = runJob.mock.calls.filter(([name]) => name === "session-poll").length;
+    // Two nominal 5s periods have elapsed; a correctly-ticking scheduler runs
+    // session-poll twice. tickMs === everyMs runs it only once.
+    expect(pollCalls).toBe(1);
+  });
+
+  it("bounds the same jitter to about one fast tick's delay when ticking faster than the interval (the fix)", async () => {
+    const runJob = vi.fn().mockResolvedValue(undefined);
+    // Same 50ms-then-0ms jitter pattern, now against a 1s tick instead of 5s.
+    const { readRuns, writeRun, now } = buildTimingHarness(1000, [50]);
+    const context = { env: FAKE_ENV, logger: { error: vi.fn() } } as unknown as AppContext;
+
+    const scheduler = startScheduler(context, { runJob, readRuns, writeRun, now, tickMs: 1000 });
+
+    for (let tick = 0; tick < 6; tick += 1) {
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    const pollCallsAtSixTicks = runJob.mock.calls.filter(([name]) => name === "session-poll").length;
+    // The 50ms offset baked into the first recorded run (at simulatedNow=1050)
+    // pushes the nominal due point (1050 + 5000 = 6050) just past the 6th
+    // tick's 6000ms mark -- still not due yet, one tick short.
+    expect(pollCallsAtSixTicks).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(1000); // 7th tick: 7000ms >= 6050ms -> due
+    await scheduler.stop();
+
+    const pollCallsAtSevenTicks = runJob.mock.calls.filter(([name]) => name === "session-poll").length;
+    // Caught on the very next fast tick -- a ~1s delay past the nominal mark,
+    // not the ~5s (a whole extra interval) the old tickMs === everyMs config
+    // produced in the test above.
+    expect(pollCallsAtSevenTicks).toBe(2);
   });
 });

@@ -24,6 +24,35 @@ import { isDue, JOB_NAMES, type JobName, type Schedule } from "./sync/schedule.j
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ROLLUP_LOOKBACK_DAYS = 7;
 
+// How long to wait before retrying a job that just failed, measured from the start of
+// the failed attempt. Applies to every job except the ones in FAST_RETRY_JOBS.
+//
+// Without this, a failing job retries on literally the next tick forever: writeRun is
+// skipped on failure so lastRunAt never advances, and isDue keeps comparing `now`
+// against that same stale timestamp, so once a job becomes due it stays "due" on every
+// tick until it finally succeeds. For reference-sync (a 15-minute interval) that turns
+// a sustained Jellyfin outage into a retry every scheduler tick (5s by default) instead
+// of every 15 minutes — 180x the intended rate. For item-sync (once a day, a full
+// library enumeration) it is worse: back-to-back retries as fast as each one completes.
+// BullMQ never had this problem because a failed repeatable job simply waited for its
+// next scheduled occurrence; this restores that property without reintroducing a queue.
+//
+// Five minutes is a fixed, deliberately simple floor rather than a per-job value tied to
+// each job's own interval: reusing reference-sync's 15-minute interval as its own
+// backoff would match BullMQ exactly, but applying that same idea to the daily jobs
+// would mean waiting a full day to retry a failure discovered at, say, 3:05am — far
+// too slow to recover same-day once Jellyfin comes back. One floor shared by every
+// non-fast-retry job is simple to reason about and bounds retries to a sane rate
+// (12/hour, worst case) regardless of the job's normal cadence.
+export const FAILURE_BACKOFF_MS = 5 * 60 * 1000;
+
+// session-poll is deliberately excluded from FAILURE_BACKOFF_MS: it is cheap (one
+// Jellyfin request), already the fastest-scheduled job, and its own README-documented
+// operator story ("job_runs.last_run_at should move forward every SESSION_POLL_INTERVAL_MS")
+// depends on it retrying on the very next tick during a brief outage rather than going
+// quiet for five minutes. The other four jobs are not on that same fast, cheap footing.
+const FAST_RETRY_JOBS: ReadonlySet<JobName> = new Set(["session-poll"]);
+
 // A rate-limit window is 15 minutes (see apps/server/src/api/app.ts). 24 hours
 // is comfortably longer than any window in use, so this never touches a row
 // an in-progress login attempt still cares about, while still reclaiming
@@ -139,23 +168,39 @@ export interface SchedulerDeps {
   logger: Pick<Logger, "error">;
   /**
    * Jobs currently in flight, keyed by name, holding the promise that settles
-   * when the job (and its follow-up bookkeeping) is done. Doubles as the
-   * overlap guard (`has(name)`) and as what `stop()` awaits before returning.
+   * when the job (and its follow-up bookkeeping) is done. `stop()` awaits
+   * every entry before returning. Also the concurrency guard: `runDueJobs`
+   * treats *any* non-empty `inFlight` as "something is already running" and
+   * will not start a second job alongside it — see the comment at that check.
    */
   inFlight: Map<JobName, Promise<void>>;
+  /**
+   * When each job's most recent *attempt* (successful or not) started, keyed by
+   * name. Distinct from `runs`/`job_runs`, which only ever records a
+   * *successful* completion: this is what lets a failed job be recognized as
+   * "recently tried" even though it never got to write one. Consulted only for
+   * jobs outside FAST_RETRY_JOBS, to enforce FAILURE_BACKOFF_MS.
+   */
+  lastAttemptAt: Map<JobName, number>;
 }
 
 /**
- * One tick: for every job that is due and not already running, kick it off.
- * Deliberately does not await job completion — it only awaits the dispatch
- * decision for each job, so a slow job never delays the next tick's read of
- * `readJobRuns`. The in-flight guard is what keeps that same slow job from
- * being started a second time by that next tick.
+ * One tick: if nothing is currently running, start the first job that is due
+ * (in `JOB_NAMES` order) and has not been recently attempted, then stop —
+ * see the concurrency comment below for why this is "the first job", not
+ * "every due job".
  *
- * On success, records `now` as the job's last-run time. On failure, logs and
- * leaves the stored timestamp untouched — a transient failure is retried on
- * the very next tick rather than waiting out a full interval or, for a daily
- * job, until the following day.
+ * Deliberately does not await job completion — it only awaits the dispatch
+ * decision, so a slow job never delays the next tick's read of
+ * `readJobRuns`. `inFlight` is what keeps that same slow job (or any other)
+ * from being started a second time by a later tick while it is still running.
+ *
+ * On success, records `now` as the job's last-run time and clears its backoff
+ * bookkeeping. On failure, logs and leaves `job_runs` untouched — an unfilled
+ * `lastRunAt` is what makes the job "due" again, so failure is retried rather
+ * than waiting out a full interval or, for a daily job, until the following
+ * day. `lastAttemptAt`, updated on every attempt regardless of outcome, is
+ * what throttles *how soon* — see FAILURE_BACKOFF_MS.
  */
 export async function runDueJobs(
   deps: SchedulerDeps,
@@ -163,15 +208,40 @@ export async function runDueJobs(
   now: number,
 ): Promise<void> {
   for (const name of JOB_NAMES) {
-    if (deps.inFlight.has(name)) continue;
+    // Global concurrency of 1, matching BullMQ's `concurrency: 1` (the setting this
+    // scheduler replaced) rather than one slot per job name. Two concrete reasons this
+    // is not merely conservative: reference-sync (15 min) and item-sync (daily) both
+    // call runReferenceSync and co-fire on the same tick roughly once a day, running
+    // two concurrent upsert batches against the same rows; and rollup-recompute
+    // (DELETE-then-INSERT over the trailing week, in one transaction) can interleave
+    // with a concurrent session-poll's applyRollupDelta UPSERT into that same window —
+    // verified against recomputeRollupRange's plain INSERT (no ON CONFLICT) in
+    // packages/db/src/repositories/playback.ts: a concurrent upsert landing between the
+    // DELETE and the INSERT collides on the same (day, user, item) key and aborts the
+    // whole recompute transaction on a duplicate-key error, which then retries every
+    // FAILURE_BACKOFF_MS (or every tick, pre-backoff) instead of once a night. A long
+    // job (item-sync's full library enumeration) delaying session-poll behind it is the
+    // accepted cost of restoring this — BullMQ's single worker had the exact same
+    // property, so it is not a regression.
+    if (deps.inFlight.size > 0) break;
 
     const lastRunAt = runs.get(name);
     const due = isDue(deps.schedules[name], lastRunAt ? lastRunAt.getTime() : null, now);
     if (!due) continue;
 
+    if (!FAST_RETRY_JOBS.has(name)) {
+      const lastAttemptAt = deps.lastAttemptAt.get(name);
+      if (lastAttemptAt !== undefined && now - lastAttemptAt < FAILURE_BACKOFF_MS) continue;
+    }
+
+    deps.lastAttemptAt.set(name, now);
+
     const run = deps
       .runJob(name)
-      .then(() => deps.writeRun(name, new Date(now)))
+      .then(() => {
+        deps.lastAttemptAt.delete(name);
+        return deps.writeRun(name, new Date(now));
+      })
       .catch((error: unknown) => {
         deps.logger.error({ err: error, job: name }, "scheduled job failed");
       })
@@ -208,7 +278,20 @@ export function startScheduler(
 ): { stop(): Promise<void> } {
   const now = options.now ?? Date.now;
   const runJob = options.runJob ?? ((name: JobName) => handle(context, name, now));
-  const tickMs = options.tickMs ?? context.env.SESSION_POLL_INTERVAL_MS;
+  // Ticks at most every 1s, faster than the shortest schedule it dispatches
+  // (SESSION_POLL_INTERVAL_MS, 5000ms by default). Ticking at exactly the
+  // interval it is checking — the previous default — is what let read latency
+  // cause a false negative: `now()` is sampled *after* readRuns() resolves (see
+  // `tick` below), so the gap between two recorded run times is
+  // `tickMs + (thisReadLatency - previousReadLatency)`, not exactly `tickMs`. With
+  // tickMs === everyMs, a read that is even a couple of milliseconds faster than
+  // the one before it makes that gap dip below everyMs and the tick is skipped —
+  // a full interval's worth of delay (10s instead of 5s for session-poll). Ticking
+  // five times as often bounds the same jitter to, at worst, one fast tick's delay
+  // (~1s) instead of a whole missed interval, at the cost of up to 5x more
+  // `readJobRuns` calls when SESSION_POLL_INTERVAL_MS is at its default. See
+  // scheduler.test.ts's "tick timing" tests, which reproduce the skip directly.
+  const tickMs = options.tickMs ?? Math.min(1000, context.env.SESSION_POLL_INTERVAL_MS);
   const readRuns = options.readRuns ?? (() => readJobRuns(context.db));
   const writeRun = options.writeRun ?? ((name: JobName, at: Date) => writeJobRun(context.db, name, at));
 
@@ -218,6 +301,7 @@ export function startScheduler(
     writeRun,
     logger: context.logger,
     inFlight: new Map(),
+    lastAttemptAt: new Map(),
   };
 
   const tick = async (): Promise<void> => {
