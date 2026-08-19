@@ -20,7 +20,6 @@ function testContext(): AppContext {
       COMPLETION_THRESHOLD: 0.9,
       JELLYFIN_URL: "http://jellyfin.example.invalid",
     },
-    redis: {},
     // Never opened: an unauthenticated request is rejected by requireAdmin
     // before any handler touches context.db or context.snapshots.
     db: {},

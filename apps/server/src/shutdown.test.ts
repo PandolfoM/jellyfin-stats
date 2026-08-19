@@ -29,7 +29,7 @@ describe("createShutdownHandler", () => {
 
   it("still exits, non-zero, and logs when close rejects", async () => {
     const logger = testLogger();
-    const failure = new Error("redis unreachable");
+    const failure = new Error("pool close failed");
     const onShutdown = vi.fn().mockRejectedValue(failure);
     const exit = vi.fn();
     const shutdown = createShutdownHandler({

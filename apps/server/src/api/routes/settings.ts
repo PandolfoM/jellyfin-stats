@@ -4,7 +4,7 @@ import type { Env, Hono, Schema } from "hono";
  * The exact, non-secret fields `GET /api/settings` may ever return.
  * Deliberately its own named interface rather than `Pick<AppEnv, ...>` (or
  * `AppEnv` itself) — `AppEnv` also carries `JELLYFIN_API_KEY`,
- * `DATABASE_URL`, `REDIS_URL`, `FALLBACK_ADMIN_USER`, and
+ * `DATABASE_URL`, `FALLBACK_ADMIN_USER`, and
  * `FALLBACK_ADMIN_PASSWORD`. Every one of those would be a serious
  * credential leak if it ever reached this response. Because the handler
  * below is built from these four named fields one at a time (see the

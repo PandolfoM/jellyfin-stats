@@ -63,8 +63,6 @@ describe("createContext", () => {
     JELLYFIN_URL: "http://jellyfin.test:8096",
     JELLYFIN_API_KEY: "test-key",
     DATABASE_URL: "postgres://u:p@127.0.0.1:1/db",
-    // Still required by the env schema (removed in a later task); unused here.
-    REDIS_URL: "redis://127.0.0.1:1",
     LOG_LEVEL: "error",
   });
 

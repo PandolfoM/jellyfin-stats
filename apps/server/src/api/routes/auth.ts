@@ -126,7 +126,7 @@ export function registerAuthRoutes<E extends Env & SessionEnv>(app: Hono<E>, dep
     })
     // No session lookup of its own: requireAdmin (mounted in api/app.ts) is the
     // single gate, and it is what re-checks isAdmin and refreshes both sides of
-    // the session — the Redis TTL and the browser cookie. Reading the store
+    // the session — its TTL and the browser cookie. Reading the store
     // directly here slid the TTL without re-issuing the cookie, so a client
     // polling only this route kept its server-side session alive while its own
     // cookie expired on the maxAge fixed at login.

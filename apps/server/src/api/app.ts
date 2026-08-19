@@ -118,8 +118,8 @@ export function createApp(context: AppContext) {
   // middleware registered after its route silently never runs first.
   //
   // /api/auth/me is gated like everything else rather than reading the session
-  // store itself: reading it directly slid the Redis TTL without re-issuing the
-  // cookie, so a client polling only /me kept its server-side session alive
+  // store itself: reading it directly slid the session's TTL without re-issuing
+  // the cookie, so a client polling only /me kept its server-side session alive
   // while its browser cookie expired on the maxAge fixed at login. It was also
   // the one place a session was honoured without re-checking isAdmin.
   app.use("/api/auth/me", requireAdmin(sessions, cookieConfig));

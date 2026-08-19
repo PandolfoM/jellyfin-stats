@@ -26,7 +26,7 @@ export function requireAdmin(
 
     c.set("session", session);
 
-    // sessions.get() above already slid the Redis TTL forward (see
+    // sessions.get() above already slid the session's TTL forward (see
     // sessions.ts), but the browser's cookie maxAge was fixed at login and
     // never refreshed on its own. Without this, an actively-used session
     // stays alive server-side indefinitely while the browser drops the

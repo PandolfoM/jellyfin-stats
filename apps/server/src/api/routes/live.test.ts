@@ -82,7 +82,7 @@ describe("GET /api/live", () => {
   it("sends an empty array rather than nothing when the snapshot cannot be read", async () => {
     const { app } = build({
       loadCurrent: vi.fn(async () => {
-        throw new Error("redis down");
+        throw new Error("snapshot store unavailable");
       }),
     });
 
@@ -137,9 +137,11 @@ describe("GET /api/live", () => {
   });
 
   it("unsubscribes immediately if the client disconnects while subscribe() is still in flight", async () => {
-    // In production subscribe() does a real network round trip (SUBSCRIBE over
-    // a fresh Redis connection). A deferred promise here stands in for that gap:
-    // it is still pending when the client disconnects, and only resolves after.
+    // subscribe() is a synchronous, in-process EventEmitter.on() in production,
+    // so it never actually stays pending — but the handler awaits its result
+    // regardless, and that await point is still a window where a disconnect can
+    // race it. A deferred promise here stands in for that window: it is still
+    // pending when the client disconnects, and only resolves after.
     const unsubscribe = vi.fn(async () => {});
     let resolveSubscribe!: (fn: () => Promise<void>) => void;
     const pending = new Promise<() => Promise<void>>((resolve) => {

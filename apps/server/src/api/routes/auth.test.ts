@@ -324,7 +324,7 @@ describe("GET /api/auth/me", () => {
 
   it("refreshes the session cookie, so polling it cannot outlive the browser's copy", async () => {
     // The reason this route goes through requireAdmin at all. Reading the
-    // session store directly slid the Redis TTL but never re-issued the
+    // session store directly slid the session's TTL but never re-issued the
     // cookie, so a client polling only /me kept its server-side session alive
     // while its own cookie expired on the maxAge fixed at login — the exact
     // server-alive/client-dead divergence the middleware exists to prevent.

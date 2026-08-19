@@ -111,7 +111,7 @@ describe("server shutdown with an open SSE stream", () => {
     await reader?.cancel().catch(() => {});
   });
 
-  it("unsubscribes each stream it ends, so no Redis connection outlives the process", async () => {
+  it("unsubscribes each stream it ends, so no listener outlives the process", async () => {
     const unsubscribe = vi.fn(async () => {});
     const app = new Hono();
     const streams = registerLiveRoute(app, {
