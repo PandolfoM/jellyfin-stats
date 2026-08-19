@@ -1,0 +1,57 @@
+name: Publish image
+
+# Runs on every push to main (rolling `latest`) and on version tags like
+# v1.2.3 (an immutable, pinnable tag) — never on pull requests, so a PR from
+# an untrusted fork can't push to the registry using this repo's permissions.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+# Least privilege: this workflow only ever needs to write packages and read
+# its own source.
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # GITHUB_TOKEN is minted per-run and scoped to this repo by the
+      # `permissions:` block above — no secret to create or rotate.
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # main -> `latest` (+ the short commit sha, for rollback);
+      # a `vX.Y.Z` tag -> `X.Y.Z`, `X.Y`, and `X` — the pinnable tags.
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
