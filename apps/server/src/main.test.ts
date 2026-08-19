@@ -1,9 +1,12 @@
 import { serve, type ServerType } from "@hono/node-server";
 import { Hono } from "hono";
+import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { registerLiveRoute } from "./api/routes/live.js";
-import { closeApiServer } from "./main.js";
+import { registerLiveRoute, type LiveStreamRegistry } from "./api/routes/live.js";
+import type { AppContext } from "./context.js";
+import { closeApiServer, shutdownApp, startApp, type StartAppDeps } from "./main.js";
 import { createShutdownHandler } from "./shutdown.js";
+import { createSnapshotStore } from "./sync/snapshot-store.js";
 
 /**
  * These run a real HTTP server over a real socket, because the behavior under
@@ -139,10 +142,15 @@ describe("server shutdown with an open SSE stream", () => {
   });
 
   it("is driven by the shutdown handler, which exits 0 rather than hanging", async () => {
-    // The composition that runs in production: SIGTERM → createShutdownHandler
-    // → closeApiServer. Before the stream registry existed this exited via the
-    // timeout at best, and in production not at all — closeContext never ran,
-    // so Postgres was never closed cleanly.
+    // Only createShutdownHandler + closeApiServer, not the full production
+    // composition — this handler's onShutdown is `() => closeApiServer(...)`
+    // alone, deliberately, to isolate exit-0-vs-hang from everything else
+    // onShutdown does in production. The real composition — scheduler.stop()
+    // before closeApiServer before closeContext — is `shutdownApp`, and its
+    // *order* (not just that it eventually exits 0) is what the "shutdownApp
+    // order" tests below pin. Before the stream registry existed at all, this
+    // exited via the timeout at best, and in production not at all —
+    // closeContext never ran, so Postgres was never closed cleanly.
     const { app, streams } = liveApp();
     const { server, url } = await startServer(app);
 
@@ -166,5 +174,112 @@ describe("server shutdown with an open SSE stream", () => {
     expect(exit).toHaveBeenCalledWith(0);
     running = undefined;
     await reader?.cancel().catch(() => {});
+  });
+});
+
+/**
+ * `main()` itself is not exported or exercised here — it does real env
+ * loading, a real Postgres connection, and process.on registration, none of
+ * which belongs in a unit test. `startApp` and `shutdownApp` exist precisely
+ * so the *order* of the startup and shutdown sequences — the entire reason
+ * this task exists — is something these tests can pin with injected fakes
+ * and no real Postgres, socket, or scheduler timer, rather than only being
+ * checked by eye or by the manual boot in the task report.
+ */
+describe("startApp order", () => {
+  function fakeContext(): AppContext {
+    // Only what createApp reads directly during construction (not via a
+    // closure it defers until a real request/shutdown) needs a real shape;
+    // everything else is a stand-in that is never called in this test.
+    return {
+      env: {
+        PORT: 0,
+        staleSessionAfterMs: 0,
+        COMPLETION_THRESHOLD: 0.9,
+        SESSION_TTL_HOURS: 1,
+        COOKIE_SECURE: false,
+        TRUST_PROXY_HEADERS: false,
+      },
+      db: {},
+      pool: {},
+      jellyfin: {},
+      snapshots: createSnapshotStore(),
+      logger: { info: vi.fn(), error: vi.fn() },
+    } as unknown as AppContext;
+  }
+
+  function fakeDeps(order: string[], fakeServer: ServerType): StartAppDeps {
+    return {
+      migrate: (async () => {
+        order.push("migrate");
+      }) as unknown as StartAppDeps["migrate"],
+      reconcile: (async () => {
+        order.push("reconcile");
+        return 0;
+      }) as unknown as StartAppDeps["reconcile"],
+      startScheduler: (() => {
+        order.push("scheduler");
+        return { stop: async () => {} };
+      }) as unknown as StartAppDeps["startScheduler"],
+      serve: ((_options: unknown, listener?: (info: AddressInfo) => void) => {
+        order.push("serve");
+        listener?.({ address: "127.0.0.1", family: "IPv4", port: 0 } as AddressInfo);
+        return fakeServer;
+      }) as unknown as StartAppDeps["serve"],
+    };
+  }
+
+  it("runs migrate, then reconcile, then the scheduler, then the HTTP listener — in that order", async () => {
+    // This is the assertion the report's finding 1 says nothing pins: delete
+    // the reconcile step (or reorder any of the four) in main.ts's startApp
+    // and this goes red, where it was previously silently green under any
+    // mutation to that sequence.
+    const order: string[] = [];
+    const fakeServer = { close: vi.fn() } as unknown as ServerType;
+
+    const started = await startApp(fakeContext(), fakeDeps(order, fakeServer));
+
+    expect(order).toEqual(["migrate", "reconcile", "scheduler", "serve"]);
+    expect(started.server).toBe(fakeServer);
+  });
+});
+
+describe("shutdownApp order", () => {
+  it("stops the scheduler, then ends streams and closes the server, then closes the context", async () => {
+    // The order the brief calls the most important thing in this task, and
+    // which nothing else pins: scheduler.stop() must finish (draining
+    // in-flight jobs) before closeApiServer runs, and closeApiServer's own
+    // stream-then-server sequencing must finish before closeContext tears
+    // down the pool a still-running job could otherwise write into.
+    const order: string[] = [];
+
+    const scheduler = {
+      stop: vi.fn(async () => {
+        order.push("scheduler");
+      }),
+    };
+    const liveStreams = {
+      size: 0,
+      closeAll: vi.fn(async () => {
+        order.push("streams");
+      }),
+    } as unknown as LiveStreamRegistry;
+    const server = {
+      close: vi.fn((cb?: (error?: Error) => void) => {
+        order.push("server");
+        cb?.();
+      }),
+    } as unknown as ServerType;
+    const context = {
+      pool: {
+        end: vi.fn(async () => {
+          order.push("context");
+        }),
+      },
+    } as unknown as AppContext;
+
+    await shutdownApp({ scheduler, server, liveStreams, context });
+
+    expect(order).toEqual(["scheduler", "streams", "server", "context"]);
   });
 });

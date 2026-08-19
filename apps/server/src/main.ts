@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./api/app.js";
 import type { LiveStreamRegistry } from "./api/routes/live.js";
-import { closeContext, createContext } from "./context.js";
+import { closeContext, createContext, type AppContext } from "./context.js";
 import { startScheduler } from "./scheduler.js";
 import { createShutdownHandler } from "./shutdown.js";
 import { reconcileOpenSessions } from "./sync/reconcile.js";
@@ -49,17 +49,61 @@ export async function closeApiServer(
   });
 }
 
-async function main(): Promise<void> {
-  const context = createContext(loadEnv());
+/**
+ * The pieces of the startup sequence that can plausibly need swapping out in a
+ * test: the migration runner, session reconciliation, the scheduler, and the
+ * HTTP listener. Defaulted to the real implementations below; overridden in
+ * main.test.ts so the *order* they run in can be asserted without a real
+ * Postgres, a real socket, or a real scheduler timer.
+ */
+export interface StartAppDeps {
+  migrate: typeof migrate;
+  reconcile: typeof reconcileOpenSessions;
+  startScheduler: typeof startScheduler;
+  serve: typeof serve;
+}
 
-  // Before anything reads or writes. One process means no second migrator to
-  // race, which is what let the separate migrate service go away.
-  await migrate(context.db, { migrationsFolder });
+const defaultStartAppDeps: StartAppDeps = {
+  migrate,
+  reconcile: reconcileOpenSessions,
+  startScheduler,
+  serve,
+};
+
+export interface StartedApp {
+  scheduler: { stop(): Promise<void> };
+  server: ServerType;
+  liveStreams: LiveStreamRegistry;
+}
+
+/**
+ * The startup sequence, in the one order that is safe:
+ *
+ * 1. Migrate — nothing else may touch the database first. One process means
+ *    no second migrator to race, which is what let the separate migrate
+ *    service go away.
+ * 2. Reconcile — repairs sessions left open by an unclean shutdown. Startup
+ *    behavior from the original pipeline; dropping it silently loses watch
+ *    time. Must run after the schema exists (migrate) and before the
+ *    scheduler starts polling, so a session-poll can never race reconciling
+ *    the same row.
+ * 3. Scheduler — its first tick reads `job_runs`, which migrate just created;
+ *    nothing about serving requests needs to happen before this.
+ * 4. HTTP listener — last, once everything it could route a request to is
+ *    already in a consistent state.
+ *
+ * Exported, with the four steps behind `deps`, precisely so this order is
+ * something a test can pin directly — see the "startApp order" tests in
+ * main.test.ts, which fail if any step is skipped or reordered.
+ */
+export async function startApp(
+  context: AppContext,
+  deps: StartAppDeps = defaultStartAppDeps,
+): Promise<StartedApp> {
+  await deps.migrate(context.db, { migrationsFolder });
   context.logger.info("migrations applied");
 
-  // Repairs sessions left open by an unclean shutdown. Startup behavior from
-  // the original pipeline — dropping it silently loses watch time.
-  const repaired = await reconcileOpenSessions({
+  const repaired = await deps.reconcile({
     db: context.db,
     staleAfterMs: context.env.staleSessionAfterMs,
     completionThreshold: context.env.COMPLETION_THRESHOLD,
@@ -69,27 +113,73 @@ async function main(): Promise<void> {
   });
   context.logger.info({ repaired }, "startup reconciliation complete");
 
-  const scheduler = startScheduler(context);
+  const scheduler = deps.startScheduler(context);
   const { app, liveStreams } = createApp(context);
 
-  const server = serve({ fetch: app.fetch, port: context.env.PORT }, (info) => {
+  const server = deps.serve({ fetch: app.fetch, port: context.env.PORT }, (info) => {
     context.logger.info({ port: info.port }, "listening");
   });
+
+  return { scheduler, server, liveStreams };
+}
+
+export interface ShutdownAppArgs {
+  scheduler: { stop(): Promise<void> };
+  server: ServerType;
+  liveStreams: LiveStreamRegistry;
+  context: AppContext;
+}
+
+/**
+ * Shutdown, in the one order that terminates rather than hanging or silently
+ * corrupting a still-in-flight write:
+ *
+ * 1. Stop the scheduler and await its in-flight jobs — no new work starts
+ *    while the rest tears down, and nothing is still running once the pool
+ *    closes underneath it.
+ * 2. `closeApiServer` — ends SSE streams before awaiting the HTTP server's
+ *    close, for the reason documented on that function: its callback never
+ *    fires while a stream is still open.
+ * 3. Close the context — last, once nothing above still needs the database.
+ *
+ * Exported, taking its collaborators as one object, so this order is
+ * something a test can pin directly — see the "shutdownApp order" tests in
+ * main.test.ts, which fail if any step is skipped or reordered.
+ */
+export async function shutdownApp({ scheduler, server, liveStreams, context }: ShutdownAppArgs): Promise<void> {
+  await scheduler.stop();
+  await closeApiServer(server, liveStreams);
+  await closeContext(context);
+}
+
+async function main(): Promise<void> {
+  const context = createContext(loadEnv());
+
+  let started: StartedApp;
+  try {
+    started = await startApp(context);
+  } catch (error) {
+    // A rejection here (most likely migrate() failing because Postgres isn't
+    // reachable) would otherwise propagate out of the top-level `await main()`
+    // below as an unhandled rejection — printed by Node's default handler with
+    // no logger line and therefore none of logger.ts's redaction. DATABASE_URL
+    // carries a password, and a pg connection error routinely echoes the
+    // connection string back. Routing it through the logger keeps it on the
+    // redaction path; closeContext releases whatever startApp already opened
+    // (at minimum the pool) instead of leaking it on exit.
+    context.logger.error({ err: error }, "startup failed");
+    await closeContext(context);
+    process.exit(1);
+  }
+
+  const { scheduler, server, liveStreams } = started;
 
   const shutdown = createShutdownHandler({
     logger: context.logger,
     exit: process.exit,
     startMessage: "shutting down",
     failureMessage: "shutdown failed",
-    onShutdown: async () => {
-      // Scheduler first: no new work starts while the rest is torn down.
-      await scheduler.stop();
-      // SSE streams before the server close. server.close()'s callback waits
-      // for every in-flight connection, and an attached stream never ends on
-      // its own — closing the server first waits forever.
-      await closeApiServer(server, liveStreams);
-      await closeContext(context);
-    },
+    onShutdown: () => shutdownApp({ scheduler, server, liveStreams, context }),
   });
 
   process.on("SIGTERM", shutdown);
