@@ -1,7 +1,8 @@
-import type Redis from "ioredis";
+import type { LiveSession } from "@jfstats/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp, createImageFetcher, createLiveSubscriber } from "./app.js";
 import type { AppContext } from "../context.js";
+import { createSnapshotStore, type SnapshotStore } from "../sync/snapshot-store.js";
 
 function testContext(): AppContext {
   return {
@@ -19,7 +20,6 @@ function testContext(): AppContext {
       COMPLETION_THRESHOLD: 0.9,
       JELLYFIN_URL: "http://jellyfin.example.invalid",
     },
-    redis: {},
     // Never opened: an unauthenticated request is rejected by requireAdmin
     // before any handler touches context.db or context.snapshots.
     db: {},
@@ -28,7 +28,24 @@ function testContext(): AppContext {
   } as unknown as AppContext;
 }
 
-const testLogger = (): { error: ReturnType<typeof vi.fn> } => ({ error: vi.fn() });
+function testSession(overrides: Partial<LiveSession> = {}): LiveSession {
+  return {
+    sessionId: "s-1",
+    userId: "u-1",
+    userName: "alpha",
+    itemId: "i-1",
+    itemName: "A Movie",
+    deviceId: "d-1",
+    deviceName: "Living Room",
+    client: "Jellyfin Web",
+    playMethod: "DirectPlay",
+    positionTicks: 10,
+    runtimeTicks: 100,
+    isPaused: false,
+    remoteEndpoint: "192.0.2.10",
+    ...overrides,
+  };
+}
 
 describe("createApp", () => {
   it("serves a health check without authentication", async () => {
@@ -129,114 +146,80 @@ describe("createApp", () => {
 });
 
 describe("createLiveSubscriber", () => {
-  it("quits the duplicated connection if SUBSCRIBE itself rejects, rather than leaking it", async () => {
-    // context.redis.duplicate() opens the connection before SUBSCRIBE is ever
-    // sent. If SUBSCRIBE then rejects (a Redis hiccup), nothing else in the
-    // codebase ever gets a reference to that connection to close it — the
-    // duplicated client must clean up after itself.
-    const quit = vi.fn(async () => {});
-    const fakeSubscriber = {
-      subscribe: vi.fn(async () => {
-        throw new Error("redis hiccup");
-      }),
-      quit,
-      on: vi.fn(),
-    };
-    const redis = { duplicate: vi.fn(() => fakeSubscriber) } as unknown as Redis;
+  it("relays a publish to onMessage as a JSON-stringified session list", async () => {
+    // Composed against the real snapshot store rather than a hand-written
+    // stub: this is what proves the JSON.stringify wrapping actually happens
+    // in the adapter, not just in some test double standing in for it.
+    const store = createSnapshotStore();
+    const onMessage = vi.fn();
 
-    const subscribe = createLiveSubscriber(redis, testLogger());
+    await createLiveSubscriber(store)(onMessage);
+    await store.publish([testSession()]);
 
-    await expect(subscribe(() => {})).rejects.toThrow("redis hiccup");
-    expect(quit).toHaveBeenCalled();
+    expect(onMessage).toHaveBeenCalledWith(JSON.stringify([testSession()]));
   });
 
-  it("registers an error listener on the duplicated connection before subscribing", async () => {
-    // duplicate() does not carry listeners over from the shared client, and
-    // there is one of these per attached dashboard tab. With no `error`
-    // listener ioredis falls back to console.error, which bypasses LOG_LEVEL
-    // and the redaction paths in logger.ts — and REDIS_URL can carry a
-    // password. Registered before SUBSCRIBE so a failure during that round
-    // trip is already covered.
-    const events: string[] = [];
-    const fakeSubscriber = {
-      subscribe: vi.fn(async () => {
-        events.push("subscribe");
-      }),
-      quit: vi.fn(async () => {}),
-      on: vi.fn((event: string) => {
-        events.push(`on:${event}`);
-      }),
-    };
-    const redis = { duplicate: vi.fn(() => fakeSubscriber) } as unknown as Redis;
+  it("stops relaying once the returned unsubscribe has run", async () => {
+    const store = createSnapshotStore();
+    const onMessage = vi.fn();
 
-    await createLiveSubscriber(redis, testLogger())(() => {});
+    const unsubscribe = await createLiveSubscriber(store)(onMessage);
+    await unsubscribe();
+    await store.publish([testSession()]);
 
-    expect(events.indexOf("on:error")).toBeGreaterThanOrEqual(0);
-    expect(events.indexOf("on:error")).toBeLessThan(events.indexOf("subscribe"));
+    expect(onMessage).not.toHaveBeenCalled();
   });
 
-  it("logs a connection error from the duplicated client through the app logger", async () => {
-    let onError: ((error: Error) => void) | undefined;
-    const fakeSubscriber = {
-      subscribe: vi.fn(async () => {}),
-      quit: vi.fn(async () => {}),
-      on: vi.fn((event: string, listener: (error: Error) => void) => {
-        if (event === "error") onError = listener;
-      }),
-    };
-    const redis = { duplicate: vi.fn(() => fakeSubscriber) } as unknown as Redis;
-    const logger = testLogger();
+  it("resolves rather than rejecting when unsubscribed", async () => {
+    // registerLiveRoute invokes this from the stream's abort path, where Hono
+    // runs subscribers through forEach with no error handling — an unobserved
+    // rejection there would kill the process under Node's default
+    // --unhandled-rejections=throw. Against the real createSnapshotStore(),
+    // EventEmitter#off is synchronous and cannot throw, so this direction
+    // alone doesn't exercise the adapter's try/catch — see the next test for
+    // that. This one just pins the resolved shape against the real store.
+    const store = createSnapshotStore();
 
-    await createLiveSubscriber(redis, logger)(() => {});
-    const failure = new Error("ECONNRESET");
-    onError?.(failure);
-
-    expect(logger.error).toHaveBeenCalledWith({ err: failure }, "live subscriber connection error");
-  });
-
-  it("resolves rather than rejecting when quit fails, because nothing observes the abort path", async () => {
-    // The unsubscribe closure is invoked from stream.onAbort, where Hono runs
-    // subscribers through forEach with no error handling. ioredis rejects
-    // pending commands with "Connection is closed.", so a rejection here
-    // becomes an unhandled rejection and, under Node's default
-    // --unhandled-rejections=throw, kills the API process.
-    const fakeSubscriber = {
-      subscribe: vi.fn(async () => {}),
-      quit: vi.fn(async () => {
-        throw new Error("Connection is closed.");
-      }),
-      on: vi.fn(),
-    };
-    const redis = { duplicate: vi.fn(() => fakeSubscriber) } as unknown as Redis;
-
-    const unsubscribe = await createLiveSubscriber(redis, testLogger())(() => {});
+    const unsubscribe = await createLiveSubscriber(store)(() => {});
 
     await expect(unsubscribe()).resolves.toBeUndefined();
-    expect(fakeSubscriber.quit).toHaveBeenCalled();
   });
 
-  it("does not quit the connection on a successful subscribe, and relays messages", async () => {
-    const quit = vi.fn(async () => {});
-    let deliver: ((channel: string, payload: string) => void) | undefined;
-    const fakeSubscriber = {
-      subscribe: vi.fn(async () => {}),
-      quit,
-      on: vi.fn((_event: string, listener: (channel: string, payload: string) => void) => {
-        deliver = listener;
-      }),
+  it("resolves rather than rejecting even when the store's unsubscribe throws", async () => {
+    // createLiveSubscriber is parameterized by SnapshotStore, so this injects
+    // the failure at the real boundary the adapter depends on, rather than
+    // mocking EventEmitter internals (which would only prove the mock
+    // behaves as programmed). A future SnapshotStore implementation, or a
+    // future edit to this file, is not guaranteed to keep subscribe()'s
+    // returned unsubscribe from ever throwing — this is what the adapter's
+    // try/catch exists for.
+    const throwingStore: SnapshotStore = {
+      load: async () => ({}),
+      save: async () => {},
+      publish: async () => {},
+      loadLive: async () => [],
+      subscribe: () => () => {
+        throw new Error("boom");
+      },
     };
-    const redis = { duplicate: vi.fn(() => fakeSubscriber) } as unknown as Redis;
 
-    const onMessage = vi.fn();
-    const unsubscribe = await createLiveSubscriber(redis, testLogger())(onMessage);
+    const unsubscribe = await createLiveSubscriber(throwingStore)(() => {});
 
-    expect(quit).not.toHaveBeenCalled();
+    await expect(unsubscribe()).resolves.toBeUndefined();
+  });
 
-    deliver?.("jfstats:sessions:live", "[]");
-    expect(onMessage).toHaveBeenCalledWith("[]");
+  it("leaves other subscribers on the same store unaffected by one unsubscribe", async () => {
+    const store = createSnapshotStore();
+    const onA = vi.fn();
+    const onB = vi.fn();
 
-    await unsubscribe();
-    expect(quit).toHaveBeenCalled();
+    const unsubscribeA = await createLiveSubscriber(store)(onA);
+    await createLiveSubscriber(store)(onB);
+    await unsubscribeA();
+    await store.publish([testSession()]);
+
+    expect(onA).not.toHaveBeenCalled();
+    expect(onB).toHaveBeenCalledTimes(1);
   });
 });
 

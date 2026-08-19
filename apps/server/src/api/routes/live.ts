@@ -20,8 +20,8 @@ export interface LiveDeps {
  * An SSE handler parks until the client disconnects, and `server.close()` does
  * not invoke its callback until every in-flight connection has ended — so
  * without this, one attached dashboard tab makes graceful shutdown hang until
- * the supervisor's grace period expires and SIGKILL lands, with the database and
- * Redis never closed cleanly.
+ * the supervisor's grace period expires and SIGKILL lands, with the database
+ * never closed cleanly.
  */
 export interface LiveStreamRegistry {
   /** Resolves once every open stream has been ended and unsubscribed. */
@@ -57,10 +57,10 @@ export function registerLiveRoute<E extends Env, S extends Schema>(app: Hono<E, 
     return streamSSE(c, async (stream) => {
       // Track abort before calling subscribe() at all — registered synchronously,
       // before cb's first await, so it is in place before the caller can possibly
-      // have gotten hold of a reader to cancel. subscribe() does a real network
-      // round trip in production (SUBSCRIBE over a fresh connection); a client
-      // that disconnects while that is still in flight must not leak the
-      // duplicated Redis connection it eventually resolves to.
+      // have gotten hold of a reader to cancel. subscribe() is a synchronous,
+      // in-process EventEmitter.on() in production, so there is no real
+      // round trip to race — but a client that disconnects before the
+      // returned unsubscribe function resolves must still not leak the stream.
       let aborted = false;
       stream.onAbort(() => {
         aborted = true;

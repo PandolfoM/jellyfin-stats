@@ -40,4 +40,4 @@ EXPOSE 3000
 # tsx is a dependency of the workspace root package.json (not any individual
 # app), so its bin lands at one stable path — node_modules/.bin/tsx — instead
 # of moving whenever workspace packages' dependency lists change.
-CMD ["node_modules/.bin/tsx", "apps/server/src/api.ts"]
+CMD ["node_modules/.bin/tsx", "apps/server/src/main.ts"]

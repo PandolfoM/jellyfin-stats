@@ -120,3 +120,53 @@ export const playbackRollupDaily = pgTable(
     index("rollup_library_day_idx").on(table.libraryId, table.day),
   ],
 );
+
+/**
+ * Opaque session ids issued at login. The id is the primary key and is the
+ * value in the cookie, so it must stay unguessable — it is generated with
+ * randomBytes(32), never derived from the user.
+ *
+ * `expiresAt` is pushed forward on every authenticated read (sliding expiry),
+ * so an admin actively using the dashboard is not logged out mid-session.
+ * Expired rows are ignored on read and swept by the session-cleanup job
+ * rather than deleted inline, so a read stays a single statement.
+ */
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    userName: text("user_name").notNull(),
+    isAdmin: boolean("is_admin").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [index("sessions_expires_at_idx").on(table.expiresAt)],
+);
+
+/**
+ * Fixed-window login throttling. One row per key: the raw TCP connection's remote
+ * address when `TRUST_PROXY_HEADERS` is false (the default), `X-Forwarded-For` (or
+ * `X-Real-Ip`) when it is true and a proxy sets one, or the constant `"unknown"` only
+ * as a last resort when neither yields a usable value — see `resolveClientKey` in
+ * `apps/server/src/api/routes/auth.ts`. `windowStartedAt` is what makes the window
+ * fixed rather than sliding: it is set once when a window opens and left alone
+ * by subsequent attempts, so a burst of attempts cannot keep pushing the
+ * window out and prevent the limit from ever triggering.
+ */
+export const rateLimits = pgTable("rate_limits", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull(),
+  windowStartedAt: timestamp("window_started_at", { withTimezone: true }).notNull(),
+});
+
+/**
+ * One row per scheduled job, holding when it last completed. This is what
+ * replaces BullMQ's repeatable jobs: the scheduler reads these, decides what
+ * is due, and writes back. Storing it rather than keeping it in memory is what
+ * lets a nightly job missed during downtime run on the next boot.
+ */
+export const jobRuns = pgTable("job_runs", {
+  name: text("name").primaryKey(),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }).notNull(),
+});

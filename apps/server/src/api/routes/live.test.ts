@@ -1,8 +1,8 @@
 import type { LiveSession } from "@jfstats/shared";
 import { Hono } from "hono";
-import type Redis from "ioredis";
 import { describe, expect, it, vi } from "vitest";
 import { createLiveSubscriber } from "../app.js";
+import { createSnapshotStore } from "../../sync/snapshot-store.js";
 import { registerLiveRoute, type LiveDeps } from "./live.js";
 
 const SESSION: LiveSession = {
@@ -82,7 +82,7 @@ describe("GET /api/live", () => {
   it("sends an empty array rather than nothing when the snapshot cannot be read", async () => {
     const { app } = build({
       loadCurrent: vi.fn(async () => {
-        throw new Error("redis down");
+        throw new Error("snapshot store unavailable");
       }),
     });
 
@@ -137,9 +137,11 @@ describe("GET /api/live", () => {
   });
 
   it("unsubscribes immediately if the client disconnects while subscribe() is still in flight", async () => {
-    // In production subscribe() does a real network round trip (SUBSCRIBE over
-    // a fresh Redis connection). A deferred promise here stands in for that gap:
-    // it is still pending when the client disconnects, and only resolves after.
+    // subscribe() is a synchronous, in-process EventEmitter.on() in production,
+    // so it never actually stays pending — but the handler awaits its result
+    // regardless, and that await point is still a window where a disconnect can
+    // race it. A deferred promise here stands in for that window: it is still
+    // pending when the client disconnects, and only resolves after.
     const unsubscribe = vi.fn(async () => {});
     let resolveSubscribe!: (fn: () => Promise<void>) => void;
     const pending = new Promise<() => Promise<void>>((resolve) => {
@@ -160,15 +162,14 @@ describe("GET /api/live", () => {
     expect(unsubscribe).toHaveBeenCalled();
   });
 
-  it("survives a client disconnect while the Redis connection is already gone", async () => {
+  it("survives a client disconnect without an unhandled rejection", async () => {
     // The abort path invokes unsubscribe without awaiting it — Hono's abort()
     // runs its subscribers through forEach with no error handling, so nothing
-    // there can observe a rejection. ioredis rejects pending commands with
-    // "Connection is closed." during a blip, so a client disconnecting at the
-    // wrong moment would otherwise raise an unhandled rejection, which Node 22
-    // turns into a process exit by default. Composed against the real
-    // createLiveSubscriber rather than a hand-written stub, because the
-    // swallow lives in that closure.
+    // there can observe a rejection. An unhandled rejection on that path would
+    // turn into a process exit under Node 22's default
+    // --unhandled-rejections=throw. Composed against the real
+    // createLiveSubscriber and a real snapshot store rather than a hand-written
+    // stub, because the guarantee lives in that closure.
     const unhandled: unknown[] = [];
     const onUnhandled = (reason: unknown): void => {
       unhandled.push(reason);
@@ -176,19 +177,11 @@ describe("GET /api/live", () => {
     process.on("unhandledRejection", onUnhandled);
 
     try {
-      const fakeSubscriber = {
-        subscribe: vi.fn(async () => {}),
-        on: vi.fn(),
-        quit: vi.fn(async () => {
-          throw new Error("Connection is closed.");
-        }),
-      };
-      const redis = { duplicate: () => fakeSubscriber } as unknown as Redis;
-
+      const store = createSnapshotStore();
       const app = new Hono();
       registerLiveRoute(app, {
         loadCurrent: async () => [],
-        subscribe: createLiveSubscriber(redis, { error: vi.fn() }),
+        subscribe: createLiveSubscriber(store),
       });
 
       const response = await app.request("/api/live");
@@ -199,8 +192,6 @@ describe("GET /api/live", () => {
       // Node reports an unhandled rejection at the end of the turn, so give it
       // several turns before concluding that none was raised.
       await new Promise((resolve) => setTimeout(resolve, 50));
-
-      expect(fakeSubscriber.quit).toHaveBeenCalled();
     } finally {
       process.off("unhandledRejection", onUnhandled);
     }

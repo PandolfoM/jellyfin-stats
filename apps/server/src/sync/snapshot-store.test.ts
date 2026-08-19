@@ -1,96 +1,122 @@
+import { describe, expect, it, vi } from "vitest";
 import type { LiveSession } from "@jfstats/shared";
-import type Redis from "ioredis";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { startTestRedis, stopTestRedis } from "../testing/redis-harness.js";
-import { createSnapshotStore, LIVE_CHANNEL } from "./snapshot-store.js";
+import { createSnapshotStore } from "./snapshot-store.js";
 
-let redis: Redis;
+function session(id: string): LiveSession {
+  return {
+    sessionId: id,
+    userId: "user-1",
+    userName: "ada",
+    itemId: "item-1",
+    itemName: "Example Movie",
+    deviceId: "device-1",
+    deviceName: "Living Room",
+    client: "Jellyfin Web",
+    playMethod: "DirectPlay",
+    positionTicks: 0,
+    runtimeTicks: null,
+    isPaused: false,
+    remoteEndpoint: null,
+  };
+}
 
-beforeAll(async () => {
-  redis = await startTestRedis();
-});
-
-afterAll(async () => {
-  await stopTestRedis();
-});
-
-beforeEach(async () => {
-  const keys = await redis.keys("jfstats:sessions:*");
-  if (keys.length > 0) await redis.del(...keys);
-});
-
-const SESSION: LiveSession = {
-  sessionId: "s-1",
-  userId: "u-1",
-  userName: "alpha",
-  itemId: "i-1",
-  itemName: "A Movie",
-  deviceId: "d-1",
-  deviceName: "Living Room",
-  client: "Jellyfin Web",
-  playMethod: "DirectPlay",
-  positionTicks: 10,
-  runtimeTicks: 100,
-  isPaused: false,
-  remoteEndpoint: "192.0.2.10",
-};
-
-describe("snapshot store loadLive", () => {
-  it("returns an empty array before anything has been published", async () => {
-    const store = createSnapshotStore(redis);
-
-    expect(await store.loadLive()).toEqual([]);
+describe("snapshot store", () => {
+  it("round-trips the diff snapshot", async () => {
+    const store = createSnapshotStore();
+    await store.save({ "a:b": { sessionId: "a", itemId: "b", positionTicks: 5, isPaused: false, observedAt: 1 } });
+    expect(await store.load()).toEqual({
+      "a:b": { sessionId: "a", itemId: "b", positionTicks: 5, isPaused: false, observedAt: 1 },
+    });
   });
 
-  it("returns the full LiveSession list from the most recent publish, not the minimal diff snapshot", async () => {
-    const store = createSnapshotStore(redis);
+  it("starts empty", async () => {
+    expect(await createSnapshotStore().load()).toEqual({});
+  });
 
-    await store.publish([SESSION]);
+  it("delivers a publish to an attached subscriber", async () => {
+    const store = createSnapshotStore();
+    const seen: LiveSession[][] = [];
+    store.subscribe((s) => seen.push(s));
 
-    // If loadLive degraded to the reducer's minimal SessionSnapshotEntry shape,
-    // userName/itemName/deviceName etc. would be missing here.
-    expect(await store.loadLive()).toEqual([SESSION]);
+    await store.publish([session("s1")]);
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.[0]?.sessionId).toBe("s1");
+  });
+
+  it("returns an empty array from loadLive before anything has been published", async () => {
+    // Nothing else exercises loadLive() pre-publish: every other test calls it
+    // only after a publish. If `live` were ever misinitialized to something
+    // other than [], a freshly-connecting dashboard would render whatever that
+    // was instead of nothing, before the first poll ever ran.
+    expect(await createSnapshotStore().loadLive()).toEqual([]);
+  });
+
+  // The reason loadLive() exists. A client attaching after the publish gets
+  // nothing from the event, so without the cache its first render is blank.
+  it("gives a late subscriber the current sessions via loadLive", async () => {
+    const store = createSnapshotStore();
+    await store.publish([session("s2")]);
+
+    const seen: LiveSession[][] = [];
+    store.subscribe((s) => seen.push(s));
+
+    expect(seen).toHaveLength(0);
+    // Full toEqual, not just a sessionId check: guards against loadLive ever
+    // degrading to the reducer's minimal SessionSnapshotEntry shape, which
+    // drops userName/itemName/deviceName — a real regression that a
+    // sessionId-only assertion would not catch.
+    expect(await store.loadLive()).toEqual([session("s2")]);
   });
 
   it("reflects only the latest publish, not an accumulation of earlier ones", async () => {
-    const store = createSnapshotStore(redis);
-    const other: LiveSession = { ...SESSION, sessionId: "s-2", itemName: "Another Movie" };
+    const store = createSnapshotStore();
+    const other = session("s7");
 
-    await store.publish([SESSION]);
+    await store.publish([session("s2")]);
     await store.publish([other]);
 
     expect(await store.loadLive()).toEqual([other]);
   });
 
-  it("returns an empty array rather than throwing when the cache is corrupt", async () => {
-    const store = createSnapshotStore(redis);
-    await redis.set("jfstats:sessions:live:cache", "{not json");
+  it("stops delivering after unsubscribe", async () => {
+    const store = createSnapshotStore();
+    const listener = vi.fn();
+    const off = store.subscribe(listener);
 
-    expect(await store.loadLive()).toEqual([]);
+    await store.publish([session("s3")]);
+    off();
+    await store.publish([session("s4")]);
+
+    expect(listener).toHaveBeenCalledTimes(1);
   });
-});
 
-describe("dedicated subscriber connection", () => {
-  it("delivers published messages to a duplicated connection while the original connection keeps running ordinary commands", async () => {
-    // This is the failure mode design point 1 exists for: an ioredis client that
-    // has issued SUBSCRIBE cannot run ordinary commands afterward. If the live
-    // route reused the app's shared connection instead of a duplicate, the first
-    // browser to open the live view would break every other Redis-backed feature
-    // (sessions, rate limiting) for the rest of the process's life.
-    const store = createSnapshotStore(redis);
-    const subscriber = redis.duplicate();
-    await subscriber.subscribe(LIVE_CHANNEL);
+  it("delivers to every attached subscriber, and unsubscribing one leaves the other", async () => {
+    const store = createSnapshotStore();
+    const a = vi.fn();
+    const b = vi.fn();
+    const offA = store.subscribe(a);
+    store.subscribe(b);
 
-    const received = new Promise<string>((resolve) => {
-      subscriber.on("message", (_channel, payload) => resolve(payload));
+    offA();
+    await store.publish([session("s5")]);
+
+    expect(a).not.toHaveBeenCalled();
+    expect(b).toHaveBeenCalledTimes(1);
+  });
+
+  // A throwing listener is one dashboard tab misbehaving. It must not stop the
+  // other tabs from getting the update, and must not reject publish() — which
+  // is awaited on the poll path and would fail the whole poll.
+  it("isolates a throwing subscriber from the others and from publish", async () => {
+    const store = createSnapshotStore();
+    store.subscribe(() => {
+      throw new Error("boom");
     });
+    const healthy = vi.fn();
+    store.subscribe(healthy);
 
-    await store.publish([SESSION]);
-
-    expect(JSON.parse(await received)).toEqual([SESSION]);
-    // The original connection must still answer ordinary commands.
-    expect(await redis.ping()).toBe("PONG");
-
-    await subscriber.quit();
+    await expect(store.publish([session("s6")])).resolves.toBeUndefined();
+    expect(healthy).toHaveBeenCalledTimes(1);
   });
 });

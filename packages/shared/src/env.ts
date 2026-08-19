@@ -7,10 +7,9 @@ const schema = z.object({
     .transform((value) => value.replace(/\/+$/, "")),
   JELLYFIN_API_KEY: z.string().min(1),
   DATABASE_URL: z.string().min(1),
-  REDIS_URL: z.string().min(1),
-  // No SESSION_SECRET. Session ids are 32 random bytes stored in Redis, and every
-  // gated request round-trips to Redis to resolve one — that lookup is the
-  // authoritative check, so signing the cookie could never change an outcome (a
+  // No SESSION_SECRET. Session ids are 32 random bytes stored in Postgres, and
+  // every gated request round-trips to Postgres to resolve one — that lookup is
+  // the authoritative check, so signing the cookie could never change an outcome (a
   // correctly-signed id for a destroyed session still fails; an unsigned id for a
   // live session still succeeds). Requiring one, with a key-generation ritual in
   // the setup instructions, taught operators it was load-bearing when nothing

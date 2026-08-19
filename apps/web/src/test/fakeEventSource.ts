@@ -20,8 +20,8 @@ import { vi } from "vitest";
  *
  * `close` is a `vi.fn()`, not a plain no-op, so tests can assert it was
  * actually called — the operational requirement this task's brief calls out
- * as mattering most: an `EventSource` left open past unmount leaks a Redis
- * subscriber server-side, one per abandoned tab.
+ * as mattering most: an `EventSource` left open past unmount leaks a
+ * server-side live-event listener, one per abandoned tab.
  */
 export class FakeEventSource extends EventTarget {
   static instances: FakeEventSource[] = [];

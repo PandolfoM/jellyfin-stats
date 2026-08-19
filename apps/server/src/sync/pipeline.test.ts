@@ -29,6 +29,7 @@ function memorySnapshotStore(): SnapshotStore {
     save: async (next) => void (snapshot = next),
     publish: async (sessions) => void (live = sessions),
     loadLive: async () => live,
+    subscribe: () => () => {},
   };
 }
 

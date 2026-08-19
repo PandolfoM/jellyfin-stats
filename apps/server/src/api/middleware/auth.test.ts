@@ -66,8 +66,8 @@ describe("requireAdmin", () => {
   });
 
   it("re-issues the session cookie with a fresh Max-Age on a successful request", async () => {
-    // The Redis TTL slides on every sessions.get() (see sessions.ts), but the
-    // browser's cookie maxAge is fixed at login. Refreshing the cookie here
+    // The session's TTL slides on every sessions.get() (see sessions.ts), but
+    // the browser's cookie maxAge is fixed at login. Refreshing the cookie here
     // keeps the two in agreement instead of the browser dropping an
     // otherwise-still-alive session.
     const app = build(vi.fn(async () => SESSION), { cookieSecure: true, sessionTtlHours: 168 });

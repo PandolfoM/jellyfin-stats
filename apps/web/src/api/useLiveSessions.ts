@@ -147,7 +147,7 @@ export function useLiveSessions(): UseLiveSessionsResult {
       source.removeEventListener(SESSIONS_EVENT, handleSessions);
       source.removeEventListener("error", handleError);
       // The operationally important line: an EventSource left open past
-      // unmount holds a Redis subscriber open server-side (see
+      // unmount holds a server-side live-event listener open (see
       // apps/server/src/api/routes/live.ts) for as long as the tab stays
       // open, even after navigating away from /live.
       source.close();

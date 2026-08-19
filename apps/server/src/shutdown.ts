@@ -18,8 +18,8 @@ export interface ShutdownHandlerOptions {
 }
 
 /**
- * Long enough for a real drain (an in-flight query, a Redis quit), short enough
- * to land well inside the 10s grace period Docker allows before SIGKILL.
+ * Long enough for a real drain (an in-flight query, closing the pool), short
+ * enough to land well inside the 10s grace period Docker allows before SIGKILL.
  */
 export const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000;
 
@@ -81,8 +81,8 @@ export function createShutdownHandler({
         await onShutdown();
         exitOnce(0);
       } catch (error) {
-        // Cleanup failed partway (e.g. Redis quit rejected but the pool is still
-        // open). Exiting non-zero is more honest than hanging past the signal, and
+        // Cleanup failed partway (e.g. the pool's end() rejected but some other
+        // step already ran). Exiting non-zero is more honest than hanging past the signal, and
         // the reason is still visible in the log rather than lost as an unhandled
         // rejection.
         logger.error({ err: error }, failureMessage);

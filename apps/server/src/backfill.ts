@@ -1,5 +1,15 @@
 import { createDb, recomputeRollupRange, type Db } from "@jfstats/db";
 import { loadEnv } from "@jfstats/shared";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Same computation as main.ts: this file lives at apps/server/src/, so the
+// relative path to packages/db/drizzle is identical.
+const migrationsFolder = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../packages/db/drizzle",
+);
 
 export interface BackfillRange {
   from: Date;
@@ -123,6 +133,13 @@ async function main(): Promise<void> {
   const toDay = parsed.to.toISOString().slice(0, 10);
 
   try {
+    // Applies whatever schema migrations haven't run yet. This script's own README
+    // section (repairing rollups over an arbitrary range) can be the very first thing
+    // run against a restored or otherwise fresh database, so it cannot assume the
+    // `app` service (the only other place migrate() was called until now) has ever
+    // started.
+    await migrate(db, { migrationsFolder });
+
     console.log(`Rebuilding daily rollups from ${fromDay} through ${toDay} (inclusive)...`);
     const days = await runBackfill(db, parsed);
     console.log(`Rebuilt ${days} day(s) of playback_rollup_daily from playback_sessions.`);

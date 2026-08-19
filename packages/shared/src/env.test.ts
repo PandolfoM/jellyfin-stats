@@ -5,7 +5,6 @@ const valid = {
   JELLYFIN_URL: "http://jellyfin.test:8096",
   JELLYFIN_API_KEY: "test-key",
   DATABASE_URL: "postgres://u:p@localhost:5432/db",
-  REDIS_URL: "redis://localhost:6379",
 };
 
 describe("loadEnv", () => {
@@ -33,8 +32,8 @@ describe("loadEnv", () => {
   });
 
   it("loads without a SESSION_SECRET, which nothing reads", () => {
-    // Session ids are 32 random bytes in Redis and every gated request
-    // round-trips to Redis to resolve one, so there is nothing for a signing
+    // Session ids are 32 random bytes in Postgres and every gated request
+    // round-trips to Postgres to resolve one, so there is nothing for a signing
     // secret to do. It used to be required, with an `openssl rand -hex 32`
     // ritual in the setup instructions, which taught operators it was
     // load-bearing. This pins the removal so it cannot creep back.
