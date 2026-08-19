@@ -145,8 +145,11 @@ export const sessions = pgTable(
 );
 
 /**
- * Fixed-window login throttling. One row per key (an IP, or a constant when
- * proxy headers are not trusted). `windowStartedAt` is what makes the window
+ * Fixed-window login throttling. One row per key: the raw TCP connection's remote
+ * address when `TRUST_PROXY_HEADERS` is false (the default), `X-Forwarded-For` (or
+ * `X-Real-Ip`) when it is true and a proxy sets one, or the constant `"unknown"` only
+ * as a last resort when neither yields a usable value — see `resolveClientKey` in
+ * `apps/server/src/api/routes/auth.ts`. `windowStartedAt` is what makes the window
  * fixed rather than sliding: it is set once when a window opens and left alone
  * by subsequent attempts, so a burst of attempts cannot keep pushing the
  * window out and prevent the limit from ever triggering.

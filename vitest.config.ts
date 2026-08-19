@@ -18,11 +18,10 @@ export default defineConfig({
     // because every file that stubs `fetch` re-stubs it before each of its
     // own tests; this is the backstop for the next test file that doesn't.
     unstubGlobals: true,
-    // Roughly a dozen files now start a real container (Postgres via
-    // packages/db/src/testing/harness.ts, or Redis via
-    // apps/server/src/testing/redis-harness.ts) and each of those harnesses
-    // caches its container in a module-level variable — one container per
-    // worker PROCESS, not one for the whole run. Vitest's default is one
+    // Roughly a dozen files now start a real Postgres container (via
+    // packages/db/src/testing/harness.ts), which caches its container in a
+    // module-level variable — one container per worker PROCESS, not one for
+    // the whole run. Vitest's default is one
     // worker per CPU, so the default parallel run starts that many containers
     // at once, which starves Docker/Ryuk on this host and produces
     // nondeterministic "Test timed out in 15000ms" failures on container
