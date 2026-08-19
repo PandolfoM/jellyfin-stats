@@ -107,19 +107,16 @@ an authenticated admin's browser) is unchanged and still open.
    falling behind. A `job_failures` table (name, error message, `failed_at`), written from the
    same `.catch()` in `runDueJobs`, would close this without reintroducing a queue.
 
-6. **The scheduler's tick interval is implicitly `SESSION_POLL_INTERVAL_MS`, not its own
-   setting.** `startScheduler`'s default `tickMs` (`apps/server/src/scheduler.ts`) is
-   `context.env.SESSION_POLL_INTERVAL_MS` — the same env var that controls how often sessions are
-   polled. That coupling is harmless at the shipped default (5000ms is a fine granularity for
-   checking whether the three daily jobs and `reference-sync` are due) but is not documented as
-   deliberate anywhere near `SESSION_POLL_INTERVAL_MS` in `.env.example` or the README, so an
-   operator who raises it to reduce Jellyfin polling load (say, to 60000ms on a large library)
-   would, as a side effect, also raise the granularity at which `runDueJobs` notices any job has
-   become due — up to a full minute of slop on catching up a missed daily job, rather than the
-   original 5 seconds. Not a correctness bug (`isDue`'s local-time catch-up logic is unaffected;
-   this only delays *noticing*), but worth a dedicated `SCHEDULER_TICK_MS` (defaulting to the
-   current 5000ms) so the two knobs can be reasoned about independently once someone actually
-   wants to tune `SESSION_POLL_INTERVAL_MS`.
+6. **A dedicated `SCHEDULER_TICK_MS` would let the tick rate and the poll interval be tuned
+   independently.** The whole-branch review found that `tickMs` defaulting to
+   `SESSION_POLL_INTERVAL_MS` was not merely a coupling but a live defect — read-latency jitter
+   could fail `isDue`'s `>=` comparison by a millisecond and skip a whole tick, discarding roughly
+   2.5s of watch time per active stream because `sync/diff.ts` clamps deltas to 1.5x the poll
+   interval. **That is fixed**: the default is now `Math.min(1000, SESSION_POLL_INTERVAL_MS)`, so a
+   slipped tick costs at most a second rather than a full interval. What remains is only the
+   ergonomic half — an operator who raises `SESSION_POLL_INTERVAL_MS` to reduce Jellyfin load still
+   has no separate knob for how often the scheduler *checks* whether anything is due. A dedicated
+   `SCHEDULER_TICK_MS` would separate them.
 
 ## Smaller cleanups
 
@@ -135,9 +132,16 @@ an authenticated admin's browser) is unchanged and still open.
    reviewer should treat `docker-compose.yml`'s diff for Task 10 as more than a comment-only
    change.
 
-8. **`apps/server/src/testing/redis-harness.ts` no longer exists but `vitest.config.ts`'s
-   parallelism comment still names it** as one of the container-backed harnesses vitest is
-   serializing around. Harmless — the comment's substance (module-level container caching causing
-   worker-process contention) is still accurate for the Postgres harness that remains — but it
-   references a file removed by this plan's Redis cleanup and should be trimmed to just
-   `packages/db/src/testing/harness.ts` next time that comment block is touched.
+8. **RESOLVED during the final fix wave** — `vitest.config.ts`'s parallelism comment no longer
+   names the deleted `apps/server/src/testing/redis-harness.ts`. Kept in this list only so a reader
+   comparing it against the branch's history is not left wondering whether it was missed.
+
+9. **`migrate()` takes no advisory lock, and three entrypoints now call it.** Drizzle's migrator
+   reads the last-applied migration and then applies pending ones inside a transaction, with no
+   lock around that read-then-write. `main.ts` has always called it; the final fix wave added calls
+   in `seed.ts` and `backfill.ts` so the README's documented first-run sequence actually works
+   against a fresh database. Running two of `app` / `seed` / `backfill` concurrently against a
+   *truly* empty database could therefore hit a duplicate-relation error or a transaction conflict.
+   Outside the documented sequential flow, and the README already warns against running more than
+   one `app` instance — but the surface is wider than it was, and a Postgres advisory lock around
+   the migrate call would close it cheaply.
