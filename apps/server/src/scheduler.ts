@@ -182,13 +182,39 @@ export interface SchedulerDeps {
    * jobs outside FAST_RETRY_JOBS, to enforce FAILURE_BACKOFF_MS.
    */
   lastAttemptAt: Map<JobName, number>;
+  /**
+   * Rotating offset into JOB_NAMES, advanced by one (mod JOB_NAMES.length) at the
+   * start of every `runDueJobs` call regardless of what ran. This is what stops a
+   * continuously-failing, fast-retry job from starving every other job of even
+   * being due-checked: `session-poll` is first in JOB_NAMES, is exempt from
+   * FAILURE_BACKOFF_MS, and never advances `lastRunAt` while it keeps failing, so
+   * a fixed iteration order would win the single global concurrency slot on
+   * literally every tick, forever, during a sustained Jellyfin outage — the other
+   * four jobs would never be reached, since the loop breaks the instant something
+   * is in flight. Rotating which job is checked first guarantees every job leads
+   * the check at least once every JOB_NAMES.length ticks, so a due job is
+   * dispatched within that many ticks regardless of which other job is failing.
+   */
+  startIndex: number;
 }
 
 /**
- * One tick: if nothing is currently running, start the first job that is due
- * (in `JOB_NAMES` order) and has not been recently attempted, then stop —
- * see the concurrency comment below for why this is "the first job", not
- * "every due job".
+ * `JOB_NAMES` rotated to start at `startIndex`, wrapping around. `((n % len) +
+ * len) % len` rather than a bare `%` guards against a negative `startIndex`,
+ * which never occurs on the increment-by-one path below but would otherwise be
+ * a silent footgun for a caller constructing one directly (as tests do).
+ */
+export function rotatedJobNames(startIndex: number): readonly JobName[] {
+  const offset = ((startIndex % JOB_NAMES.length) + JOB_NAMES.length) % JOB_NAMES.length;
+  return [...JOB_NAMES.slice(offset), ...JOB_NAMES.slice(0, offset)];
+}
+
+/**
+ * One tick: if nothing is currently running, start the first due, not-recently-
+ * attempted job in this tick's *rotated* job order, then stop — see the
+ * concurrency comment below for why this is "the first job", not "every due
+ * job", and the `startIndex` doc comment on `SchedulerDeps` for why the order
+ * rotates instead of always starting at `JOB_NAMES[0]`.
  *
  * Deliberately does not await job completion — it only awaits the dispatch
  * decision, so a slow job never delays the next tick's read of
@@ -207,7 +233,13 @@ export async function runDueJobs(
   runs: Map<string, Date>,
   now: number,
 ): Promise<void> {
-  for (const name of JOB_NAMES) {
+  // Advance the rotation once per call, unconditionally — even a tick that
+  // dispatches nothing (or errors) still moves on, so a stuck rotation can
+  // never re-favor the same job indefinitely.
+  const order = rotatedJobNames(deps.startIndex);
+  deps.startIndex = (deps.startIndex + 1) % JOB_NAMES.length;
+
+  for (const name of order) {
     // Global concurrency of 1, matching BullMQ's `concurrency: 1` (the setting this
     // scheduler replaced) rather than one slot per job name. Two concrete reasons this
     // is not merely conservative: reference-sync (15 min) and item-sync (daily) both
@@ -222,7 +254,13 @@ export async function runDueJobs(
     // FAILURE_BACKOFF_MS (or every tick, pre-backoff) instead of once a night. A long
     // job (item-sync's full library enumeration) delaying session-poll behind it is the
     // accepted cost of restoring this — BullMQ's single worker had the exact same
-    // property, so it is not a regression.
+    // property, so it is not a regression. A single global slot combined with a fixed
+    // iteration order would, however, be a regression on its own: session-poll is
+    // exempt from FAILURE_BACKOFF_MS and re-qualifies as due on literally every tick
+    // while it keeps failing, so a fixed order would let it win this slot forever
+    // during a sustained Jellyfin outage, starving the other four jobs of ever being
+    // checked at all rather than merely delaying them. `order` (rotated per call, see
+    // `startIndex` on SchedulerDeps) is what keeps that bounded instead of unbounded.
     if (deps.inFlight.size > 0) break;
 
     const lastRunAt = runs.get(name);
@@ -302,6 +340,7 @@ export function startScheduler(
     logger: context.logger,
     inFlight: new Map(),
     lastAttemptAt: new Map(),
+    startIndex: 0,
   };
 
   const tick = async (): Promise<void> => {

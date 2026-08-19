@@ -206,6 +206,7 @@ describe("runDueJobs", () => {
       logger: fakeLogger(),
       inFlight,
       lastAttemptAt: new Map(),
+      startIndex: 0,
     };
     const runs = runsWithOnlyDue(TARGET);
 
@@ -240,6 +241,7 @@ describe("runDueJobs", () => {
       logger: fakeLogger(),
       inFlight,
       lastAttemptAt: new Map(),
+      startIndex: 0,
     };
     // writeRun is never called on failure, so this same "never ran" runs map
     // is still accurate on the second tick — the job is still due.
@@ -266,6 +268,7 @@ describe("runDueJobs", () => {
       logger,
       inFlight,
       lastAttemptAt: new Map(),
+      startIndex: 0,
     };
     const runs = runsWithOnlyDue(TARGET);
 
@@ -290,6 +293,7 @@ describe("runDueJobs", () => {
       logger,
       inFlight,
       lastAttemptAt: new Map(),
+      startIndex: 0,
     };
     const runs = runsWithOnlyDue(TARGET);
 
@@ -443,8 +447,9 @@ describe("startScheduler", () => {
 
     // SESSION_POLL_INTERVAL_MS is 5000 here; ticking at that cadence (the old
     // default, which is what let read-latency jitter skip a whole interval —
-    // see the "tick timing" tests below) would call readRuns once in 3s.
-    // Ticking at the 1s floor calls it three times.
+    // see the "tick timing" tests below) would call readRuns zero times in 3s,
+    // since the first fire wouldn't land until the 5s mark. Ticking at the 1s
+    // floor calls it three times.
     expect(readRuns.mock.calls.length).toBe(3);
   });
 });
@@ -474,6 +479,7 @@ describe("runDueJobs backoff on repeated failure", () => {
       logger,
       inFlight,
       lastAttemptAt,
+      startIndex: 0,
     };
     const runs = runsWithOnlyDue(BACKOFF_TARGET);
 
@@ -511,6 +517,7 @@ describe("runDueJobs backoff on repeated failure", () => {
       logger,
       inFlight,
       lastAttemptAt,
+      startIndex: 0,
     };
     const runs = runsWithOnlyDue(TARGET); // TARGET === "session-poll"
 
@@ -553,6 +560,7 @@ describe("runDueJobs global concurrency", () => {
       logger: fakeLogger(),
       inFlight,
       lastAttemptAt,
+      startIndex: 0,
     };
     // Every job is due: none has ever run.
     const runs = new Map<string, Date>();
@@ -566,6 +574,72 @@ describe("runDueJobs global concurrency", () => {
 
     resolveFirst?.();
     await waitUntilIdle(inFlight, started[0] as JobName);
+  });
+});
+
+// --- runDueJobs: fairness under a continuously-failing fast-retry job -------
+//
+// A combination finding: none of findings 3-5 causes this alone, but together
+// they do. session-poll is first in JOB_NAMES, is exempt from
+// FAILURE_BACKOFF_MS (finding 4's fix), and -- while it keeps failing --
+// never advances lastRunAt, so isDue returns true for it on literally every
+// tick. With a fixed iteration order and the single global concurrency slot
+// (finding 5's fix), that lets session-poll win the slot every single tick,
+// forever, during a sustained Jellyfin outage: the loop hits
+// `if (inFlight.size > 0) break` right after dispatching it, so
+// reference-sync/item-sync/rollup-recompute/session-cleanup are never even
+// due-checked. rotatedJobNames is what bounds that to JOB_NAMES.length ticks
+// instead of indefinitely.
+
+function runsWithDue(due: readonly JobName[]): Map<string, Date> {
+  const runs = new Map<string, Date>();
+  for (const name of JOB_NAMES) {
+    if (!due.includes(name)) runs.set(name, new Date(FIXED_NOW));
+  }
+  return runs;
+}
+
+describe("runDueJobs fairness under a continuously-failing fast-retry job", () => {
+  it("still starts another due job within JOB_NAMES.length ticks while session-poll fails on every attempt", async () => {
+    const runJob = vi.fn((name: JobName) =>
+      name === "session-poll" ? Promise.reject(new Error("jellyfin unreachable")) : Promise.resolve(undefined),
+    );
+    const writeRun = vi.fn().mockResolvedValue(undefined);
+    const logger = fakeLogger();
+    const inFlight = new Map<JobName, Promise<void>>();
+    const lastAttemptAt = new Map<JobName, number>();
+    const deps: SchedulerDeps = {
+      schedules: NEVER_DUE_SCHEDULES,
+      runJob,
+      writeRun,
+      logger,
+      inFlight,
+      lastAttemptAt,
+      startIndex: 0,
+    };
+    // session-poll and rollup-recompute have never run (both due); the other
+    // three already ran "now" under a huge interval, so they're not due --
+    // isolating the assertion to whether rollup-recompute specifically gets a
+    // turn, rather than merely "something other than session-poll ran".
+    const runs = runsWithDue(["session-poll", "rollup-recompute"]);
+
+    let rollupStarted = false;
+    for (let tick = 0; tick < JOB_NAMES.length; tick += 1) {
+      await runDueJobs(deps, runs, FIXED_NOW + tick * 5_000);
+      await vi.waitFor(() => {
+        if (inFlight.size > 0) throw new Error("still in flight");
+      });
+      if (runJob.mock.calls.some(([name]) => name === "rollup-recompute")) {
+        rollupStarted = true;
+        break;
+      }
+    }
+
+    expect(rollupStarted).toBe(true);
+    // session-poll did fail repeatedly along the way -- confirms the scenario
+    // actually exercised the starvation condition rather than rollup-recompute
+    // simply winning by luck on tick 1.
+    expect(runJob.mock.calls.filter(([name]) => name === "session-poll").length).toBeGreaterThan(0);
   });
 });
 
