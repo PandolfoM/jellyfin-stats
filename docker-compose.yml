@@ -1,10 +1,3 @@
-# Anchors so the compose-network connection strings below have exactly one
-# copy each — three services need DATABASE_URL and two need REDIS_URL, and a
-# hand-copied string in each service is exactly how one of them quietly ends
-# up out of sync with the others after an edit to just one.
-x-database-url: &database-url postgres://jfstats:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/jfstats
-x-redis-url: &redis-url redis://redis:6379
-
 services:
   postgres:
     image: postgres:17-alpine
@@ -13,8 +6,6 @@ services:
       POSTGRES_USER: jfstats
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: jfstats
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -23,83 +14,31 @@ services:
       timeout: 5s
       retries: 10
 
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  # DATABASE_URL and REDIS_URL are re-pointed at the compose service names
-  # for all three app services below: .env's DATABASE_URL/REDIS_URL are
-  # host-facing values (postgres/redis publish to localhost there for `tsx`
-  # dev run directly on the host), but a container reaches its sibling
-  # containers by service name over the compose network, not via the host's
-  # published ports or "localhost". Passing .env's values straight through
-  # via env_file alone would leave every container trying to dial its own
-  # loopback interface.
-  #
-  # PORT needs no such override. Unlike DATABASE_URL/REDIS_URL, it does not
-  # name a network address that differs between host and container — it
-  # names the port the api process itself binds to (packages/shared/src/env.ts,
-  # apps/server/src/api.ts), which is the same number no matter which side of
-  # the container boundary you're asking from. So it flows straight through
-  # env_file, and the api service's `ports:` mapping below uses that same
-  # `${PORT:-3000}` value on both sides of the `:`, instead of hardcoding the
-  # container side to 3000 — hardcoding it there would let the host-side
-  # port move on its own while the container went on listening at 3000,
-  # making the published port dial a container that isn't listening on it.
-  migrate:
-    build: .
-    command: ["node_modules/.bin/tsx", "apps/server/src/migrate.ts"]
-    restart: "no"
-    env_file: .env
-    environment:
-      DATABASE_URL: *database-url
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  api:
+  app:
     build: .
     restart: unless-stopped
     env_file: .env
     environment:
-      DATABASE_URL: *database-url
-      REDIS_URL: *redis-url
+      # The container reaches Postgres by service name over the compose
+      # network; .env's DATABASE_URL is the host-facing value used by `tsx`
+      # run directly on the host, and would send the container to its own
+      # loopback interface.
+      DATABASE_URL: postgres://jfstats:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/jfstats
     ports:
+      # Both sides use the same value: PORT is what the process binds to
+      # (packages/shared/src/env.ts), not a host-only knob, so hardcoding the
+      # container side would let the published port dial a container that is
+      # not listening on it.
       - "${PORT:-3000}:${PORT:-3000}"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:${PORT:-3000}/api/health || exit 1"]
+      start_period: 30s
+      interval: 15s
+      timeout: 3s
+      retries: 3
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-
-  worker:
-    build: .
-    command: ["node_modules/.bin/tsx", "apps/server/src/worker.ts"]
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      DATABASE_URL: *database-url
-      REDIS_URL: *redis-url
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
 
 volumes:
   postgres-data:
-  redis-data:
