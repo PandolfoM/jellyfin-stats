@@ -9,6 +9,16 @@ import {
   upsertUsers,
 } from "@jfstats/db";
 import { loadEnv } from "@jfstats/shared";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Same computation as main.ts: this file lives at apps/server/src/, so the
+// relative path to packages/db/drizzle is identical.
+const migrationsFolder = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../packages/db/drizzle",
+);
 
 export interface SeedOptions {
   days: number;
@@ -143,6 +153,13 @@ async function main(): Promise<void> {
   const data = generateSeedData({ days: 90, users: 4, items: 60, seed: 42 });
 
   try {
+    // Applies whatever schema migrations haven't run yet. Required here, not just in
+    // main.ts: the README's documented first-run flow runs this script directly
+    // against a freshly created `postgres` container, before the `app` service (the
+    // only other place migrate() was called) has ever started. Without this, every
+    // insert below fails with a missing-relation error on a fresh volume.
+    await migrate(db, { migrationsFolder });
+
     // Every generated session is closed, so re-running this script would never hit
     // the schema's partial identity index (open rows only) and onConflictDoNothing
     // would never fire — a second run would just double every row. Deleting this

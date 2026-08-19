@@ -213,6 +213,18 @@ not a hang. Two ways to actually confirm it's alive:
 | `COOKIE_SECURE` | `false` | Marks the session cookie `Secure`; see [Running the API](#running-the-api) |
 | `SESSION_TTL_HOURS` | `168` | Session lifetime (sliding); see [Running the API](#running-the-api) |
 | `TRUST_PROXY_HEADERS` | `false` | Trust `X-Forwarded-For` for rate limiting; see [Running the API](#running-the-api) |
+| `TZ` | unset (container runs UTC) | IANA timezone (e.g. `America/New_York`) the three nightly maintenance jobs are scheduled against; see the note below |
+
+**Nothing sets `TZ` for you.** `item-sync`, `rollup-recompute`, and `session-cleanup` run
+at 03:00/03:30/04:00 in whatever timezone the process sees, chosen to land during quiet
+viewing hours rather than peak ones (see `apps/server/src/sync/schedule.ts`). Leave `TZ`
+unset and that "local time" is UTC — `node:22-alpine` has no other default — so the jobs
+land at 03:00/03:30/04:00 UTC, which is peak evening viewing across most of the Americas.
+Set `TZ` in `.env` to your own IANA timezone name to actually get quiet-hours scheduling;
+under `docker compose up -d`, `env_file: .env` already passes it through to the container
+with no other change needed. (`SESSION_POLL_INTERVAL_MS` and `REFERENCE_SYNC_INTERVAL_MS`,
+the two interval-based jobs, are unaffected either way — only the three daily jobs read
+local time.)
 
 ## API
 

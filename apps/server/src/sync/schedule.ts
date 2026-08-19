@@ -17,10 +17,16 @@ export type JobName = (typeof JOB_NAMES)[number];
  * fired, in LOCAL time.
  *
  * Local, not UTC, deliberately: this replaces BullMQ cron patterns that fired
- * at 03:00 in the process's own timezone, and the container sets TZ. Computing
- * the target with Date.UTC would move nightly maintenance to 23:00 for an
- * Eastern deployment — peak viewing rather than the quiet hours it was chosen
- * for. The Date constructor used here reads local fields.
+ * at 03:00 in the process's own timezone, and the container *may* set TZ (see
+ * `.env.example` / the README's configuration table — it is passed through via
+ * `env_file:` in docker-compose.yml, but nothing sets it by default, so an
+ * unconfigured deployment runs Node's own default, UTC on node:22-alpine).
+ * Computing the target with Date.UTC would move nightly maintenance to 23:00
+ * for an Eastern deployment — peak viewing rather than the quiet hours it was
+ * chosen for — but leaving TZ unset means the "local time" this function reads
+ * is UTC too, so the jobs still land at 03:00/03:30/04:00 UTC rather than at
+ * quiet hours for the operator's own timezone. Set TZ to get the intended
+ * behavior. The Date constructor used here reads local fields.
  *
  * The fallback to "yesterday's target" uses calendar arithmetic
  * (new Date(y, m, d-1, h, min)) rather than fixed-millisecond subtraction,
