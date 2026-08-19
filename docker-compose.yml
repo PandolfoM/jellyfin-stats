@@ -6,6 +6,15 @@ services:
       POSTGRES_USER: jfstats
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: jfstats
+    ports:
+      # Bound to loopback only, not 0.0.0.0: this exists so a host-side
+      # process (the dev server run via `pnpm --filter @jfstats/server dev`,
+      # `seed`, `backfill`, or a local `psql`) can reach Postgres — the `app`
+      # container never uses this, it reaches Postgres over the compose
+      # network by service name (see DATABASE_URL below). Loopback-only means
+      # this does not additionally expose Postgres to the LAN the way the
+      # `app` service's published port intentionally does.
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -17,6 +26,14 @@ services:
   app:
     build: .
     restart: unless-stopped
+    # Exactly one replica: it runs the startup migration and the in-process
+    # scheduler, and neither is safe to run twice against the same database —
+    # a second scheduler would double-poll Jellyfin, and two `migrate()` calls
+    # at once could race the same schema. The fixed host port below already
+    # rejects `docker compose up -d --scale app=2` on this single host, but
+    # that is incidental, not the guarantee: it does not hold under Swarm or a
+    # reverse-proxy topology where two instances could run without a port
+    # clash. Do not scale this service.
     env_file: .env
     environment:
       # The container reaches Postgres by service name over the compose
