@@ -60,6 +60,22 @@ export async function getHistory(
 
   const filters = [sql`true`];
 
+  // A session that flaps out of Jellyfin's /Sessions payload and back closes its row
+  // and opens a fresh one, because the identity index is partial (open rows only) —
+  // see openSession in playback.ts. Each cycle leaves a row credited no watch time,
+  // which is churn rather than a viewing, so history omits them.
+  //
+  // The bound is `> 0`, not some "too short to count" threshold: formatDuration
+  // renders anything under a minute as seconds ("45s") and only ever returns "0m"
+  // for <= 0, so this is exactly the set of rows that look empty in the UI.
+  //
+  // Pushed into `filters` rather than onto the row query alone, so the count(*)
+  // below excludes them too — otherwise `total` would promise pages that are not
+  // there. Note this does not unwind playback_rollup_daily, which still counts
+  // these as plays; History will read lower than the dashboards' play counts until
+  // the flapping itself is fixed.
+  filters.push(sql`s.watch_ms > 0`);
+
   if (options.userId !== undefined) filters.push(sql`s.user_id = ${options.userId}`);
   if (options.libraryId !== undefined) filters.push(sql`i.library_id = ${options.libraryId}`);
   if (options.from !== undefined) {
