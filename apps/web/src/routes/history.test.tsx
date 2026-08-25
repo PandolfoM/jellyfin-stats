@@ -28,7 +28,10 @@ afterEach(() => vi.restoreAllMocks());
 const AUTHENTICATED_BODY = JSON.stringify({ userId: "user-1", userName: "admin", isAdmin: true });
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 interface HistoryRowFixture {
@@ -61,7 +64,13 @@ const FIXTURE_USERS = [
   { userId: "user-fixture-1", name: "Ada Lovelace", isAdmin: false, plays: 5, watchMs: 300_000 },
 ];
 const FIXTURE_LIBRARIES = [
-  { libraryId: "library-fixture-1", name: "Movies", collectionType: "movies", plays: 5, watchMs: 300_000 },
+  {
+    libraryId: "library-fixture-1",
+    name: "Movies",
+    collectionType: "movies",
+    plays: 5,
+    watchMs: 300_000,
+  },
 ];
 
 interface FetchOverrides {
@@ -89,8 +98,10 @@ function mockFetch(overrides: FetchOverrides = {}): string[] {
         const params = new URL(url, "http://localhost").searchParams;
         return overrides.history?.(params) ?? jsonResponse({ rows: [], total: 0 });
       }
-      if (url.includes("/api/stats/users")) return overrides.users?.() ?? jsonResponse(FIXTURE_USERS);
-      if (url.includes("/api/stats/libraries")) return overrides.libraries?.() ?? jsonResponse(FIXTURE_LIBRARIES);
+      if (url.includes("/api/stats/users"))
+        return overrides.users?.() ?? jsonResponse(FIXTURE_USERS);
+      if (url.includes("/api/stats/libraries"))
+        return overrides.libraries?.() ?? jsonResponse(FIXTURE_LIBRARIES);
 
       throw new Error(`history.test.tsx did not expect a fetch to ${url}`);
     }),
@@ -110,7 +121,11 @@ function countCalls(calls: string[], pathIncludes: string): number {
 describe("History route", () => {
   it("fires /api/history with the default range and page 1's limit/offset", async () => {
     const calls = mockFetch({
-      history: () => jsonResponse({ rows: [makeHistoryRow({ id: "row-1", itemName: "Example Movie", userName: "admin" })], total: 1 }),
+      history: () =>
+        jsonResponse({
+          rows: [makeHistoryRow({ id: "row-1", itemName: "Example Movie", userName: "admin" })],
+          total: 1,
+        }),
     });
 
     renderApp("/history");
@@ -161,7 +176,9 @@ describe("History route", () => {
     // field the test happens to accept any string into.
     fireEvent.change(select, { target: { value: "user-fixture-1" } });
 
-    await waitFor(() => expect(paramsFor(calls, "/api/history")?.get("userId")).toBe("user-fixture-1"));
+    await waitFor(() =>
+      expect(paramsFor(calls, "/api/history")?.get("userId")).toBe("user-fixture-1"),
+    );
   });
 
   it("threads the libraryId filter into the request independently of userId", async () => {
@@ -175,7 +192,9 @@ describe("History route", () => {
     await screen.findByRole("option", { name: "Movies" });
     fireEvent.change(select, { target: { value: "library-fixture-1" } });
 
-    await waitFor(() => expect(paramsFor(calls, "/api/history")?.get("libraryId")).toBe("library-fixture-1"));
+    await waitFor(() =>
+      expect(paramsFor(calls, "/api/history")?.get("libraryId")).toBe("library-fixture-1"),
+    );
     // userId must still be absent — proves the two filters are independent
     // fields, not one shared piece of state that clobbers the other.
     expect(paramsFor(calls, "/api/history")?.has("userId")).toBe(false);
@@ -189,7 +208,11 @@ describe("History route", () => {
         // page 1 and to prove the real offset math, not just that *a*
         // second request happened.
         const rows = Array.from({ length: Math.min(50, 125 - offset) }, (_, i) =>
-          makeHistoryRow({ id: `row-${offset + i}`, itemName: `Example Movie ${offset + i}`, userName: "admin" }),
+          makeHistoryRow({
+            id: `row-${offset + i}`,
+            itemName: `Example Movie ${offset + i}`,
+            userName: "admin",
+          }),
         );
         return jsonResponse({ rows, total: 125 });
       },
@@ -230,14 +253,18 @@ describe("History route", () => {
 
     renderApp("/history");
 
-    expect(await screen.findByTestId("playback-history-summary")).toHaveTextContent("Showing 1–50 of 812");
+    expect(await screen.findByTestId("playback-history-summary")).toHaveTextContent(
+      "Showing 1–50 of 812",
+    );
   });
 
   it("renders a row with placeholder item/user names plainly, without an error state", async () => {
     mockFetch({
       history: () =>
         jsonResponse({
-          rows: [makeHistoryRow({ id: "row-1", itemName: "Unknown item", userName: "Unknown user" })],
+          rows: [
+            makeHistoryRow({ id: "row-1", itemName: "Unknown item", userName: "Unknown user" }),
+          ],
           total: 1,
         }),
     });
@@ -250,7 +277,9 @@ describe("History route", () => {
   });
 
   it("shows the panel error and does not blank the filters when the query gets a 500", async () => {
-    mockFetch({ history: () => new Response(JSON.stringify({ error: "internal_error" }), { status: 500 }) });
+    mockFetch({
+      history: () => new Response(JSON.stringify({ error: "internal_error" }), { status: 500 }),
+    });
 
     const router = renderApp("/history");
     await screen.findByTestId("history-route");

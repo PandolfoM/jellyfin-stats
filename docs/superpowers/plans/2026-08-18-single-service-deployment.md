@@ -4,11 +4,11 @@
 
 **Goal:** Collapse the deployment from five services to two — `postgres` and `app` — by removing Redis and BullMQ entirely and merging the API, worker, and migration entrypoints into one process.
 
-**Architecture:** Redis currently does five jobs. Three of them (the live-session cache, the worker→API pub/sub channel, and BullMQ's job transport) exist *only* because the API and worker are separate processes; merging the processes replaces them with an `EventEmitter` and a plain object. The remaining two — session storage and login rate limiting — become Postgres tables. BullMQ's four repeatable jobs become a Postgres-backed scheduler that stores each job's last-run timestamp and ticks against it, which also makes a daily job missed during downtime run on the next boot rather than being skipped.
+**Architecture:** Redis currently does five jobs. Three of them (the live-session cache, the worker→API pub/sub channel, and BullMQ's job transport) exist _only_ because the API and worker are separate processes; merging the processes replaces them with an `EventEmitter` and a plain object. The remaining two — session storage and login rate limiting — become Postgres tables. BullMQ's four repeatable jobs become a Postgres-backed scheduler that stores each job's last-run timestamp and ticks against it, which also makes a daily job missed during downtime run on the next boot rather than being skipped.
 
 **Tech Stack:** Node 22, TypeScript strict, Drizzle ORM + PostgreSQL 17, Hono, `node:events`. **Removes** `ioredis`, `bullmq`, and `@testcontainers/redis`.
 
-**Spec:** [`docs/superpowers/specs/2026-08-16-jellyfin-stats-design.md`](../specs/2026-08-16-jellyfin-stats-design.md). This plan changes that spec's deployment topology — the spec describes App + Postgres + Redis; the outcome here is App + Postgres. Everything the spec says about *behavior* still holds and must not regress.
+**Spec:** [`docs/superpowers/specs/2026-08-16-jellyfin-stats-design.md`](../specs/2026-08-16-jellyfin-stats-design.md). This plan changes that spec's deployment topology — the spec describes App + Postgres + Redis; the outcome here is App + Postgres. Everything the spec says about _behavior_ still holds and must not regress.
 
 This is Plan 4. Plans 1–3 are complete; Plan 3 is on `feat/web-ui-and-packaging` awaiting merge. **This plan builds on Plan 3 and must start from it, not from `main`.**
 
@@ -28,16 +28,16 @@ This is Plan 4. Plans 1–3 are complete; Plan 3 is on `feat/web-ui-and-packagin
 
 These are behaviors the current Redis implementation has that reviewers should check for explicitly. Each was a deliberate decision, several were bug fixes, and losing one silently is the main risk of this plan.
 
-| Behavior | Where it lives now | Why it exists |
-|---|---|---|
-| Session ids are random, not derived | `sessions.ts` `randomBytes(32)` | A guessable id is a login bypass. |
-| Sliding expiry on read | `sessions.ts` `redis.expire` on `get` | An admin using the dashboard is not logged out mid-session. |
-| Rate limiter **fails closed** | `rate-limit.ts` returns `{ allowed: false }` on a malformed reply | A datastore fault must not silently switch login throttling off. |
-| Rate limit window does not slide | `expire(..., "NX")` | Otherwise every attempt resets the TTL and the limit never triggers. |
-| Corrupt snapshot cache does not stop capture | `snapshot-store.ts` `catch { return {} }` | Playback capture outranks the cache. |
-| A late SSE subscriber still sees current sessions | `LIVE_CACHE_KEY` alongside `publish` | The channel message only reaches clients subscribed at publish time. |
-| The live unsubscribe **must not reject** | `createLiveSubscriber` | Hono invokes it via `forEach` with no error handling; an unobserved rejection kills the process. |
-| Nightly jobs run at **local** 03:00/03:30 | BullMQ cron `0 3 * * *` | The container sets `TZ`. In UTC these would fire at 23:00 Eastern — peak viewing. |
+| Behavior                                          | Where it lives now                                                | Why it exists                                                                                    |
+| ------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Session ids are random, not derived               | `sessions.ts` `randomBytes(32)`                                   | A guessable id is a login bypass.                                                                |
+| Sliding expiry on read                            | `sessions.ts` `redis.expire` on `get`                             | An admin using the dashboard is not logged out mid-session.                                      |
+| Rate limiter **fails closed**                     | `rate-limit.ts` returns `{ allowed: false }` on a malformed reply | A datastore fault must not silently switch login throttling off.                                 |
+| Rate limit window does not slide                  | `expire(..., "NX")`                                               | Otherwise every attempt resets the TTL and the limit never triggers.                             |
+| Corrupt snapshot cache does not stop capture      | `snapshot-store.ts` `catch { return {} }`                         | Playback capture outranks the cache.                                                             |
+| A late SSE subscriber still sees current sessions | `LIVE_CACHE_KEY` alongside `publish`                              | The channel message only reaches clients subscribed at publish time.                             |
+| The live unsubscribe **must not reject**          | `createLiveSubscriber`                                            | Hono invokes it via `forEach` with no error handling; an unobserved rejection kills the process. |
+| Nightly jobs run at **local** 03:00/03:30         | BullMQ cron `0 3 * * *`                                           | The container sets `TZ`. In UTC these would fire at 23:00 Eastern — peak viewing.                |
 
 ---
 
@@ -72,11 +72,13 @@ apps/server/src/
 ### Task 1: Schema for sessions, rate limits, and job runs
 
 **Files:**
+
 - Modify: `packages/db/src/schema.ts`
 - Create: `packages/db/drizzle/0002_*.sql` (generated)
 - Test: `packages/db/src/schema.test.ts` (extend the existing table-list assertion)
 
 **Interfaces:**
+
 - Produces: `sessions`, `rateLimits`, `jobRuns` Drizzle tables, exported from `@jfstats/db`.
 
 - [ ] **Step 1: Add the tables**
@@ -149,6 +151,7 @@ Expected: a new `packages/db/drizzle/0002_*.sql`. Read it before continuing and 
 ```bash
 pnpm vitest run packages/db/src/schema.test.ts
 ```
+
 Expected: PASS. If it fails naming a missing table, the migration did not generate — do not hand-write it, fix the generate step.
 
 - [ ] **Step 5: Commit**
@@ -163,11 +166,13 @@ git commit -m "feat: add sessions, rate_limits, and job_runs tables"
 ### Task 2: Postgres session and rate-limit repositories
 
 **Files:**
+
 - Create: `packages/db/src/repositories/auth.ts`
 - Modify: `packages/db/src/index.ts` (export it)
 - Test: `packages/db/src/repositories/auth.test.ts`
 
 **Interfaces:**
+
 - Consumes: `sessions`, `rateLimits` from Task 1.
 - Produces, all taking `db: Db` as the first argument:
   - `insertSession(db, row: { id, userId, userName, isAdmin, createdAt: Date, expiresAt: Date }): Promise<void>`
@@ -207,7 +212,9 @@ describe("session repository", () => {
 
   it("returns null for an unknown id", async () => {
     const now = new Date("2026-08-18T12:00:00Z");
-    expect(await selectLiveSession(db, "sess-nope", now, new Date(now.getTime() + HOUR))).toBeNull();
+    expect(
+      await selectLiveSession(db, "sess-nope", now, new Date(now.getTime() + HOUR)),
+    ).toBeNull();
   });
 
   // The row EXISTS and is expired. A fixture that never expires would let a
@@ -224,7 +231,9 @@ describe("session repository", () => {
     });
 
     const later = new Date(issued.getTime() + 2 * HOUR);
-    expect(await selectLiveSession(db, "sess-stale", later, new Date(later.getTime() + HOUR))).toBeNull();
+    expect(
+      await selectLiveSession(db, "sess-stale", later, new Date(later.getTime() + HOUR)),
+    ).toBeNull();
   });
 
   // Sliding expiry: reading at T pushes the deadline out, so a read at
@@ -244,7 +253,9 @@ describe("session repository", () => {
     await selectLiveSession(db, "sess-active", midway, new Date(midway.getTime() + HOUR));
 
     const past = new Date(issued.getTime() + 90 * 60 * 1000);
-    expect(await selectLiveSession(db, "sess-active", past, new Date(past.getTime() + HOUR))).not.toBeNull();
+    expect(
+      await selectLiveSession(db, "sess-active", past, new Date(past.getTime() + HOUR)),
+    ).not.toBeNull();
   });
 
   it("destroys a session", async () => {
@@ -263,8 +274,22 @@ describe("session repository", () => {
 
   it("sweeps only expired rows", async () => {
     const now = new Date("2026-08-18T12:00:00Z");
-    await insertSession(db, { id: "keep", userId: "u", userName: "n", isAdmin: true, createdAt: now, expiresAt: new Date(now.getTime() + HOUR) });
-    await insertSession(db, { id: "sweep", userId: "u", userName: "n", isAdmin: true, createdAt: now, expiresAt: new Date(now.getTime() - HOUR) });
+    await insertSession(db, {
+      id: "keep",
+      userId: "u",
+      userName: "n",
+      isAdmin: true,
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + HOUR),
+    });
+    await insertSession(db, {
+      id: "sweep",
+      userId: "u",
+      userName: "n",
+      isAdmin: true,
+      createdAt: now,
+      expiresAt: new Date(now.getTime() - HOUR),
+    });
 
     expect(await deleteExpiredSessions(db, now)).toBe(1);
     expect(await selectLiveSession(db, "keep", now, new Date(now.getTime() + HOUR))).not.toBeNull();
@@ -308,6 +333,7 @@ describe("rate limit repository", () => {
 ```bash
 pnpm vitest run packages/db/src/repositories/auth.test.ts
 ```
+
 Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement**
@@ -414,13 +440,14 @@ export * from "./repositories/auth.js";
 ```bash
 pnpm vitest run packages/db/src/repositories/auth.test.ts
 ```
+
 Expected: PASS, 8 tests.
 
 - [ ] **Step 5: Prove the expiry and fixed-window guards are load-bearing**
 
 Two mutations, each restored after:
 
-1. Delete the `sql\`${sessions.expiresAt} > ${now}\`` term from `selectLiveSession`'s WHERE. The "exists but has expired" test must go **red**.
+1. Delete the `sql\`${sessions.expiresAt} > ${now}\``term from`selectLiveSession`'s WHERE. The "exists but has expired" test must go **red**.
 2. Change `bumpRateLimit`'s `windowStartedAt` set-expression to always write `now`. The "does not slide the window" test must go **red** (it will report 3, not 1, on the final assertion).
 
 Report both red outputs and the restored green. If either stays green, the test is not testing what it claims.
@@ -437,10 +464,12 @@ git commit -m "feat: add Postgres session and rate-limit repositories"
 ### Task 3: Point the session store and rate limiter at Postgres
 
 **Files:**
+
 - Modify: `apps/server/src/api/sessions.ts`, `apps/server/src/api/rate-limit.ts`
 - Test: `apps/server/src/api/sessions.test.ts`, `apps/server/src/api/rate-limit.test.ts` (both exist and currently use a Redis testcontainer)
 
 **Interfaces:**
+
 - Consumes: Task 2's repository functions.
 - Produces: the **same** `SessionStore` and `RateLimiter` interfaces as today, so no caller changes:
   - `createSessionStore(db: Db, ttlSeconds?: number): SessionStore` — was `(redis: Redis, ttlSeconds?)`
@@ -456,7 +485,7 @@ Both files currently spin a Redis container. Switch them to the Postgres harness
 
 ```ts
 it("fails closed when the datastore errors", async () => {
-  const broken = { /* a Db whose insert/update rejects */ } as unknown as Db;
+  const broken = {/* a Db whose insert/update rejects */} as unknown as Db;
   const limiter = createRateLimiter(broken, { limit: 10, windowSeconds: 900 });
   expect(await limiter.check("ip-x")).toEqual({ allowed: false, remaining: 0 });
 });
@@ -467,6 +496,7 @@ it("fails closed when the datastore errors", async () => {
 ```bash
 pnpm vitest run apps/server/src/api/sessions.test.ts apps/server/src/api/rate-limit.test.ts
 ```
+
 Expected: FAIL — the factories still want a Redis client.
 
 - [ ] **Step 3: Implement**
@@ -475,12 +505,7 @@ Expected: FAIL — the factories still want a Redis client.
 
 ```ts
 import { randomBytes } from "node:crypto";
-import {
-  deleteSession,
-  insertSession,
-  selectLiveSession,
-  type Db,
-} from "@jfstats/db";
+import { deleteSession, insertSession, selectLiveSession, type Db } from "@jfstats/db";
 
 export interface SessionRecord {
   userId: string;
@@ -581,6 +606,7 @@ In `apps/server/src/api/app.ts`, `createSessionStore(context.redis, ...)` become
 ```bash
 pnpm vitest run apps/server/src/api
 ```
+
 Expected: PASS.
 
 - [ ] **Step 6: Prove fail-closed is load-bearing**
@@ -599,18 +625,21 @@ git commit -m "feat: back sessions and rate limiting with Postgres"
 ### Task 4: In-process snapshot store and live event bus
 
 **Files:**
+
 - Modify: `apps/server/src/sync/snapshot-store.ts`
 - Modify: `apps/server/src/api/app.ts` (`createLiveSubscriber`)
 - Test: `apps/server/src/sync/snapshot-store.test.ts` (exists, currently Redis-backed)
 
 **Interfaces:**
+
 - Produces: `createSnapshotStore(): SnapshotStore` — no arguments now. The `SnapshotStore` interface is **unchanged**: `load()`, `save(snapshot)`, `publish(sessions)`, `loadLive()`. Plus one addition for the API side:
   - `subscribe(listener: (sessions: LiveSession[]) => void): () => void` — returns an unsubscribe function.
 
 **Why this is safe now:** the only reason `publish` crossed a process boundary was the separate worker. With one process, `publish` is a method call. The Redis version's own comment says the snapshot is "purely as a cache. Losing it costs at most one poll interval of watch time, because Postgres remains the source of truth and startup reconciliation repairs anything left open" — that reasoning is exactly as true for an in-memory object, which is why no persistence replacement is needed.
 
 **Two guarantees to preserve, both easy to lose here:**
-1. A subscriber that attaches *after* a publish must still see the current sessions — that is what `loadLive()` is for, and the SSE route calls it on connect. Do not delete it.
+
+1. A subscriber that attaches _after_ a publish must still see the current sessions — that is what `loadLive()` is for, and the SSE route calls it on connect. Do not delete it.
 2. The unsubscribe function **must not reject**. Hono invokes it from the stream abort path via `forEach` with no error handling; an unobserved rejection terminates the process under Node's default `--unhandled-rejections=throw`. An `EventEmitter` `off()` does not throw, so returning a synchronous unsubscribe is naturally safe — but `LiveDeps.subscribe` is typed as returning `Promise<() => Promise<void>>`, so keep the async shape and make sure the body cannot throw.
 
 - [ ] **Step 1: Write the failing tests**
@@ -643,7 +672,9 @@ function session(id: string): LiveSession {
 describe("snapshot store", () => {
   it("round-trips the diff snapshot", async () => {
     const store = createSnapshotStore();
-    await store.save({ "a:b": { sessionId: "a", itemId: "b", positionTicks: 5, isPaused: false, observedAt: 1 } });
+    await store.save({
+      "a:b": { sessionId: "a", itemId: "b", positionTicks: 5, isPaused: false, observedAt: 1 },
+    });
     expect(await store.load()).toEqual({
       "a:b": { sessionId: "a", itemId: "b", positionTicks: 5, isPaused: false, observedAt: 1 },
     });
@@ -725,6 +756,7 @@ describe("snapshot store", () => {
 ```bash
 pnpm vitest run apps/server/src/sync/snapshot-store.test.ts
 ```
+
 Expected: FAIL — `createSnapshotStore` still requires a Redis client, and `subscribe` does not exist.
 
 - [ ] **Step 3: Implement**
@@ -839,6 +871,7 @@ Update its call site in `createApp` — it currently receives `(context.redis, c
 ```bash
 pnpm vitest run apps/server/src
 ```
+
 Expected: PASS.
 
 - [ ] **Step 6: Prove the late-subscriber guarantee is load-bearing**
@@ -857,10 +890,12 @@ git commit -m "feat: move the live session cache and event bus in-process"
 ### Task 5: Pure scheduling logic
 
 **Files:**
+
 - Create: `apps/server/src/sync/schedule.ts`
 - Test: `apps/server/src/sync/schedule.test.ts`
 
 **Interfaces:**
+
 - Produces:
   - `type Schedule = { type: "interval"; everyMs: number } | { type: "daily"; hour: number; minute: number }`
   - `isDue(schedule: Schedule, lastRunAt: number | null, now: number): boolean`
@@ -955,14 +990,14 @@ describe("isDue — daily, in local time", () => {
 ```bash
 pnpm vitest run apps/server/src/sync/schedule.test.ts
 ```
+
 Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement**
 
 ```ts
 export type Schedule =
-  | { type: "interval"; everyMs: number }
-  | { type: "daily"; hour: number; minute: number };
+  { type: "interval"; everyMs: number } | { type: "daily"; hour: number; minute: number };
 
 export const JOB_NAMES = [
   "session-poll",
@@ -1014,6 +1049,7 @@ export function isDue(schedule: Schedule, lastRunAt: number | null, now: number)
 ```bash
 pnpm vitest run apps/server/src/sync/schedule.test.ts
 ```
+
 Expected: PASS, 10 tests.
 
 - [ ] **Step 5: Prove the timezone guard is load-bearing**
@@ -1032,11 +1068,13 @@ git commit -m "feat: add pure scheduling logic with local-time daily jobs"
 ### Task 6: Job-run repository and the scheduler runtime
 
 **Files:**
+
 - Create: `packages/db/src/repositories/jobs.ts`, `apps/server/src/scheduler.ts`
 - Modify: `packages/db/src/index.ts`
 - Test: `packages/db/src/repositories/jobs.test.ts`, `apps/server/src/scheduler.test.ts`
 
 **Interfaces:**
+
 - Consumes: `isDue`, `JobName`, `JOB_NAMES` (Task 5); `jobRuns` (Task 1); `handle(context, name, now?)` — the existing job dispatcher, currently in `apps/server/src/worker.ts`. **Move `handle` and its `JobName` switch into `scheduler.ts`** and extend it with a `session-cleanup` case calling `deleteExpiredSessions`.
 - Produces:
   - `readJobRuns(db): Promise<Map<string, Date>>`
@@ -1044,6 +1082,7 @@ git commit -m "feat: add pure scheduling logic with local-time daily jobs"
   - `startScheduler(context, options?): { stop(): Promise<void> }`
 
 **Two runtime guarantees the tests must pin:**
+
 1. **No overlapping runs of the same job.** A poll that takes longer than the interval must not stack — the next tick skips a job already in flight. Without this, a slow Jellyfin turns a 5-second interval into unbounded concurrency.
 2. **A failing job does not stop the scheduler.** It logs and the loop continues. It also must **not** write a last-run timestamp on failure, so a transient error retries on the next tick rather than waiting a full interval.
 
@@ -1128,6 +1167,7 @@ Design `startScheduler` so these are writable: accept `{ now?: () => number; run
 ```bash
 pnpm vitest run packages/db/src/repositories/jobs.test.ts apps/server/src/scheduler.test.ts
 ```
+
 Expected: FAIL — modules not found.
 
 - [ ] **Step 4: Implement the scheduler**
@@ -1161,6 +1201,7 @@ case "session-cleanup": {
 ```bash
 pnpm vitest run packages/db/src/repositories/jobs.test.ts apps/server/src/scheduler.test.ts
 ```
+
 Expected: PASS.
 
 - [ ] **Step 6: Prove the overlap guard is load-bearing**
@@ -1179,21 +1220,24 @@ git commit -m "feat: replace BullMQ with a Postgres-backed scheduler"
 ### Task 7: The single entrypoint
 
 **Files:**
+
 - Create: `apps/server/src/main.ts`
 - Delete: `apps/server/src/api.ts`, `apps/server/src/worker.ts`, `apps/server/src/migrate.ts`
 - Modify: `apps/server/package.json` (scripts), `apps/server/src/context.ts`
 - Test: `apps/server/src/api.test.ts` and `apps/server/src/worker.test.ts` exist — fold whatever still applies into a new `apps/server/src/main.test.ts` and delete the rest.
 
 **Interfaces:**
+
 - Produces: `apps/server/src/main.ts` as the only entrypoint. `createContext(env)` no longer builds a Redis client; `AppContext` loses its `redis` field and `snapshots` becomes `createSnapshotStore()`.
 
 **Startup order matters and is not arbitrary:**
+
 1. Apply migrations. Nothing else can touch the database first — and with one process there is no second migrator to race, which is why the separate `migrate` service can go.
 2. Reconcile open sessions (`reconcileOpenSessions`) — this is existing startup behavior from Plan 1 that repairs sessions left open by an unclean shutdown. **Do not drop it.**
 3. Start the scheduler.
 4. Start the HTTP server.
 
-**Shutdown order matters more.** The existing `closeApiServer` comment explains it: `server.close()`'s callback does not fire until every in-flight connection has ended, and an attached SSE stream never ends on its own — so the streams must be ended *before* awaiting the server close, or shutdown hangs forever. Preserve that. The order is: stop the scheduler (and await in-flight jobs) → end SSE streams → close the HTTP server → close the context.
+**Shutdown order matters more.** The existing `closeApiServer` comment explains it: `server.close()`'s callback does not fire until every in-flight connection has ended, and an attached SSE stream never ends on its own — so the streams must be ended _before_ awaiting the server close, or shutdown hangs forever. Preserve that. The order is: stop the scheduler (and await in-flight jobs) → end SSE streams → close the HTTP server → close the context.
 
 - [ ] **Step 1: Write `main.ts`**
 
@@ -1289,6 +1333,7 @@ Remove `dev:api` and `dev:worker`.
 ```bash
 pnpm test && pnpm typecheck
 ```
+
 Both must pass. Deleting three entrypoints will break their test files — fold the still-relevant assertions into `main.test.ts` rather than deleting coverage wholesale, and say in your report exactly which assertions you carried over and which you dropped as no longer applicable.
 
 - [ ] **Step 5: Verify it actually runs**
@@ -1308,10 +1353,12 @@ git commit -m "feat: merge the api, worker, and migration entrypoints"
 ### Task 8: Remove Redis from the dependency tree and configuration
 
 **Files:**
+
 - Modify: `packages/shared/src/env.ts` (drop `REDIS_URL`), `apps/server/package.json`, root `package.json` if needed
 - Delete: any remaining Redis-only test harness (`apps/server/src/testing/redis-harness.ts`) and its consumers
 
 **Interfaces:**
+
 - Produces: an `AppEnv` with no `REDIS_URL`. This is a **breaking config change** — a deployment that still sets `REDIS_URL` will not fail (unknown keys are ignored by the schema), but one relying on it will silently lose nothing, since nothing reads it.
 
 - [ ] **Step 1: Remove the config key**
@@ -1329,14 +1376,16 @@ pnpm --filter @jfstats/server remove ioredis bullmq @testcontainers/redis
 ```bash
 grep -rn "ioredis\|bullmq\|REDIS_URL\|redis" apps packages --include=*.ts --include=*.json | grep -v node_modules
 ```
-Expected: no matches outside comments describing the *former* design. Any live match is a missed reader — fix it rather than leaving it.
+
+Expected: no matches outside comments describing the _former_ design. Any live match is a missed reader — fix it rather than leaving it.
 
 - [ ] **Step 4: Run**
 
 ```bash
 pnpm test && pnpm typecheck
 ```
-Expected: PASS. Report the new test count — it will drop, because the Redis-backed session, rate-limit, and snapshot tests were replaced with Postgres and in-memory equivalents in Tasks 3 and 4. A *large* unexplained drop means coverage was deleted rather than moved; account for the delta explicitly.
+
+Expected: PASS. Report the new test count — it will drop, because the Redis-backed session, rate-limit, and snapshot tests were replaced with Postgres and in-memory equivalents in Tasks 3 and 4. A _large_ unexplained drop means coverage was deleted rather than moved; account for the delta explicitly.
 
 - [ ] **Step 5: Commit**
 
@@ -1350,9 +1399,11 @@ git commit -m "chore: remove ioredis, bullmq, and REDIS_URL"
 ### Task 9: Two-service Dockerfile and compose
 
 **Files:**
+
 - Modify: `Dockerfile`, `docker-compose.yml`, `.env.example`
 
 **Interfaces:**
+
 - Produces: a compose file with exactly two services, `postgres` and `app`.
 
 - [ ] **Step 1: Update the Dockerfile**
@@ -1399,7 +1450,11 @@ services:
       # not listening on it.
       - "${PORT:-3000}:${PORT:-3000}"
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:${PORT:-3000}/api/health || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider http://localhost:${PORT:-3000}/api/health || exit 1",
+        ]
       start_period: 30s
       interval: 15s
       timeout: 3s
@@ -1440,6 +1495,7 @@ git commit -m "feat: collapse the deployment to two services"
 ### Task 10: Documentation and end-to-end verification
 
 **Files:**
+
 - Modify: `README.md`
 - Create: `docs/superpowers/follow-ups-after-plan-4.md`
 
@@ -1454,6 +1510,7 @@ State plainly that migrations run automatically at startup.
 ```bash
 pnpm exec playwright test
 ```
+
 The credential-gated test still skips without `E2E_JELLYFIN_USER`/`E2E_JELLYFIN_PASSWORD`; the four anonymous assertions must pass against the two-service stack. Report which ran and which skipped.
 
 - [ ] **Step 3: Full suite and typecheck**

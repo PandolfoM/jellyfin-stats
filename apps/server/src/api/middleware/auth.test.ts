@@ -70,7 +70,10 @@ describe("requireAdmin", () => {
     // the browser's cookie maxAge is fixed at login. Refreshing the cookie here
     // keeps the two in agreement instead of the browser dropping an
     // otherwise-still-alive session.
-    const app = build(vi.fn(async () => SESSION), { cookieSecure: true, sessionTtlHours: 168 });
+    const app = build(
+      vi.fn(async () => SESSION),
+      { cookieSecure: true, sessionTtlHours: 168 },
+    );
 
     const response = await app.request("/api/protected", {
       headers: { Cookie: `${SESSION_COOKIE}=session-id-1` },

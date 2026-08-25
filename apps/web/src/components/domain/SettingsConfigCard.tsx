@@ -48,8 +48,8 @@ export function SettingsConfigCard({ config, loading }: SettingsConfigCardProps)
       <CardHeader>
         <CardTitle>Configuration</CardTitle>
         <CardDescription>
-          These values are set through environment variables on the server when it is deployed, and cannot
-          be changed here.
+          These values are set through environment variables on the server when it is deployed, and
+          cannot be changed here.
         </CardDescription>
       </CardHeader>
       <CardContent className="divide-y divide-border">

@@ -24,7 +24,10 @@ const ITEM_ID_PATTERN = /^[0-9a-f]{32}$/i;
  * threading in an already-chained app keeps those routes in the returned
  * type instead of them being erased at this call.
  */
-export function registerImageRoutes<E extends Env, S extends Schema>(app: Hono<E, S>, deps: ImageDeps) {
+export function registerImageRoutes<E extends Env, S extends Schema>(
+  app: Hono<E, S>,
+  deps: ImageDeps,
+) {
   return app.get("/api/images/items/:itemId", async (c) => {
     const itemId = c.req.param("itemId");
     if (!ITEM_ID_PATTERN.test(itemId)) {

@@ -23,7 +23,9 @@ function session(id: string): LiveSession {
 describe("snapshot store", () => {
   it("round-trips the diff snapshot", async () => {
     const store = createSnapshotStore();
-    await store.save({ "a:b": { sessionId: "a", itemId: "b", positionTicks: 5, isPaused: false, observedAt: 1 } });
+    await store.save({
+      "a:b": { sessionId: "a", itemId: "b", positionTicks: 5, isPaused: false, observedAt: 1 },
+    });
     expect(await store.load()).toEqual({
       "a:b": { sessionId: "a", itemId: "b", positionTicks: 5, isPaused: false, observedAt: 1 },
     });

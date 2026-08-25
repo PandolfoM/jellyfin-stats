@@ -25,14 +25,20 @@ function deps(
 
 describe("runReferenceSync", () => {
   it("syncs users and libraries when includeItems is false", async () => {
-    const users: JellyfinUser[] = [
-      { id: "user-1", name: "Alice", isAdmin: true },
-    ];
-    const libraries: JellyfinLibrary[] = [
-      { id: "lib-1", name: "Films", collectionType: "movies" },
-    ];
+    const users: JellyfinUser[] = [{ id: "user-1", name: "Alice", isAdmin: true }];
+    const libraries: JellyfinLibrary[] = [{ id: "lib-1", name: "Films", collectionType: "movies" }];
     const items: JellyfinItem[] = [
-      { id: "item-1", name: "Test Movie", type: "Movie", libraryId: "lib-1", seriesId: null, seasonId: null, productionYear: null, runtimeTicks: null, imageTag: null },
+      {
+        id: "item-1",
+        name: "Test Movie",
+        type: "Movie",
+        libraryId: "lib-1",
+        seriesId: null,
+        seasonId: null,
+        productionYear: null,
+        runtimeTicks: null,
+        imageTag: null,
+      },
     ];
 
     const d = deps(users, libraries, items, false);
@@ -45,34 +51,58 @@ describe("runReferenceSync", () => {
   });
 
   it("skips items entirely when includeItems is false", async () => {
-    const users: JellyfinUser[] = [
-      { id: "user-1", name: "Bob", isAdmin: false },
-    ];
+    const users: JellyfinUser[] = [{ id: "user-1", name: "Bob", isAdmin: false }];
     const libraries: JellyfinLibrary[] = [
       { id: "lib-2", name: "Shows", collectionType: "tvshows" },
     ];
     const items: JellyfinItem[] = [
-      { id: "item-2", name: "Test Show", type: "Series", libraryId: "lib-2", seriesId: null, seasonId: null, productionYear: null, runtimeTicks: null, imageTag: null },
+      {
+        id: "item-2",
+        name: "Test Show",
+        type: "Series",
+        libraryId: "lib-2",
+        seriesId: null,
+        seasonId: null,
+        productionYear: null,
+        runtimeTicks: null,
+        imageTag: null,
+      },
     ];
 
     const d = deps(users, libraries, items, false);
     await runReferenceSync(d);
 
-    expect((d.jellyfin.getItems as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(d.jellyfin.getItems as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
     expect(d.upsertItems).not.toHaveBeenCalled();
     expect(d.archiveMissingItems).not.toHaveBeenCalled();
   });
 
   it("syncs items and archives when includeItems is true", async () => {
-    const users: JellyfinUser[] = [
-      { id: "user-3", name: "Charlie", isAdmin: false },
-    ];
-    const libraries: JellyfinLibrary[] = [
-      { id: "lib-3", name: "Music", collectionType: "music" },
-    ];
+    const users: JellyfinUser[] = [{ id: "user-3", name: "Charlie", isAdmin: false }];
+    const libraries: JellyfinLibrary[] = [{ id: "lib-3", name: "Music", collectionType: "music" }];
     const items: JellyfinItem[] = [
-      { id: "item-3", name: "Song One", type: "Audio", libraryId: "lib-3", seriesId: null, seasonId: null, productionYear: null, runtimeTicks: null, imageTag: null },
-      { id: "item-4", name: "Song Two", type: "Audio", libraryId: "lib-3", seriesId: null, seasonId: null, productionYear: null, runtimeTicks: null, imageTag: null },
+      {
+        id: "item-3",
+        name: "Song One",
+        type: "Audio",
+        libraryId: "lib-3",
+        seriesId: null,
+        seasonId: null,
+        productionYear: null,
+        runtimeTicks: null,
+        imageTag: null,
+      },
+      {
+        id: "item-4",
+        name: "Song Two",
+        type: "Audio",
+        libraryId: "lib-3",
+        seriesId: null,
+        seasonId: null,
+        productionYear: null,
+        runtimeTicks: null,
+        imageTag: null,
+      },
     ];
 
     const d = deps(users, libraries, items, true);

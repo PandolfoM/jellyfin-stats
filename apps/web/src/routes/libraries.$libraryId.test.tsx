@@ -19,14 +19,27 @@ import { renderApp } from "../test/renderApp";
 
 afterEach(() => vi.restoreAllMocks());
 
-const AUTHENTICATED_BODY = JSON.stringify({ userId: "session-user", userName: "admin", isAdmin: true });
+const AUTHENTICATED_BODY = JSON.stringify({
+  userId: "session-user",
+  userName: "admin",
+  isAdmin: true,
+});
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 const ROSTER = [
-  { libraryId: "library-alpha-1", name: "Movies", collectionType: "movies", plays: 42, watchMs: 7_265_000 },
+  {
+    libraryId: "library-alpha-1",
+    name: "Movies",
+    collectionType: "movies",
+    plays: 42,
+    watchMs: 7_265_000,
+  },
   { libraryId: "library-quiet-1", name: "Home Videos", collectionType: null, plays: 0, watchMs: 0 },
 ];
 
@@ -45,7 +58,8 @@ function mockFetch(overrides: FetchOverrides = {}): string[] {
       calls.push(url);
 
       if (url.includes("/api/auth/me")) return jsonResponse(JSON.parse(AUTHENTICATED_BODY));
-      if (url.includes("/api/stats/libraries")) return overrides.libraries?.() ?? jsonResponse(ROSTER);
+      if (url.includes("/api/stats/libraries"))
+        return overrides.libraries?.() ?? jsonResponse(ROSTER);
       if (url.includes("/api/stats/top-items")) {
         const params = new URL(url, "http://localhost").searchParams;
         return overrides.topItems?.(params) ?? jsonResponse([]);
@@ -123,7 +137,9 @@ describe("Library detail route", () => {
 
     renderApp("/libraries/library-alpha-1");
 
-    await waitFor(() => expect(countCalls(calls, "/api/stats/top-items")).toBeGreaterThanOrEqual(1));
+    await waitFor(() =>
+      expect(countCalls(calls, "/api/stats/top-items")).toBeGreaterThanOrEqual(1),
+    );
     expect(paramsFor(calls, "/api/stats/top-items")?.get("libraryId")).toBe("library-alpha-1");
   });
 
@@ -172,7 +188,9 @@ describe("Library detail route", () => {
   });
 
   it("shows only the failing panel's error when top-items 500s, and still renders the rest", async () => {
-    mockFetch({ topItems: () => new Response(JSON.stringify({ error: "internal_error" }), { status: 500 }) });
+    mockFetch({
+      topItems: () => new Response(JSON.stringify({ error: "internal_error" }), { status: 500 }),
+    });
 
     renderApp("/libraries/library-alpha-1");
 

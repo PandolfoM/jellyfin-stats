@@ -29,7 +29,9 @@ export function StatCard({ label, value, hint, loading = false }: StatCardProps)
         ) : (
           <p className="text-3xl font-semibold text-foreground">{value}</p>
         )}
-        {hint !== undefined && !loading && <p className="mt-1 text-sm text-muted-foreground">{hint}</p>}
+        {hint !== undefined && !loading && (
+          <p className="mt-1 text-sm text-muted-foreground">{hint}</p>
+        )}
       </CardContent>
     </Card>
   );

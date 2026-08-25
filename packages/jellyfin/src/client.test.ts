@@ -6,11 +6,12 @@ import itemsByLibraryFixture from "./fixtures/items-by-library.json";
 import { createJellyfinClient } from "./client.js";
 
 function clientWith(payload: unknown, status = 200) {
-  const fetchMock = vi.fn<typeof fetch>(async () =>
-    new Response(JSON.stringify(payload), {
-      status,
-      headers: { "content-type": "application/json" },
-    }),
+  const fetchMock = vi.fn<typeof fetch>(
+    async () =>
+      new Response(JSON.stringify(payload), {
+        status,
+        headers: { "content-type": "application/json" },
+      }),
   );
 
   const client = createJellyfinClient({

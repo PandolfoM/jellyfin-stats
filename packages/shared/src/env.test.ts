@@ -48,7 +48,9 @@ describe("loadEnv", () => {
   });
 
   it("rejects a completion threshold above 1", () => {
-    expect(() => loadEnv({ ...valid, COMPLETION_THRESHOLD: "1.5" })).toThrow(/COMPLETION_THRESHOLD/);
+    expect(() => loadEnv({ ...valid, COMPLETION_THRESHOLD: "1.5" })).toThrow(
+      /COMPLETION_THRESHOLD/,
+    );
   });
 
   it("enables the fallback admin only when both credentials are set", () => {

@@ -41,7 +41,9 @@ export function DeviceBreakdown({ devices, loading }: DeviceBreakdownProps) {
   }
 
   if (devices.length === 0) {
-    return <EmptyState title="No devices" description="No sessions recorded in the selected range." />;
+    return (
+      <EmptyState title="No devices" description="No sessions recorded in the selected range." />
+    );
   }
 
   // Floored at 1, not just `Math.max(...devices.map(...))` — a device only
@@ -55,7 +57,11 @@ export function DeviceBreakdown({ devices, loading }: DeviceBreakdownProps) {
   return (
     <ul className="flex flex-col gap-3">
       {devices.map((device) => (
-        <li key={device.deviceId} data-testid="device-breakdown-row" className="flex flex-col gap-1">
+        <li
+          key={device.deviceId}
+          data-testid="device-breakdown-row"
+          className="flex flex-col gap-1"
+        >
           <div className="flex items-center justify-between text-sm">
             <span className="font-medium text-foreground">{device.name}</span>
             <span className="text-muted-foreground">{formatCount(device.plays)} plays</span>

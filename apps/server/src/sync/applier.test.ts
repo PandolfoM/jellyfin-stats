@@ -45,14 +45,21 @@ describe("applyEvents", () => {
     const session = live();
     const key = snapshotKey("ps-1", "item-1");
 
-    await applyEvents(d, [{ type: "started", key, session, at: AT.getTime() }], new Map([[key, session]]));
+    await applyEvents(
+      d,
+      [{ type: "started", key, session, at: AT.getTime() }],
+      new Map([[key, session]]),
+    );
 
-    expect(d.openSession).toHaveBeenCalledWith(d.db, expect.objectContaining({
-      sessionId: "ps-1",
-      itemId: "item-1",
-      userId: "user-1",
-      playMethod: "DirectPlay",
-    }));
+    expect(d.openSession).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({
+        sessionId: "ps-1",
+        itemId: "item-1",
+        userId: "user-1",
+        playMethod: "DirectPlay",
+      }),
+    );
     expect(d.upsertDevice).toHaveBeenCalledWith(d.db, expect.objectContaining({ id: "device-1" }));
   });
 
@@ -64,7 +71,11 @@ describe("applyEvents", () => {
     const session = live({ isPaused: true });
     const key = snapshotKey("ps-1", "item-1");
 
-    await applyEvents(d, [{ type: "started", key, session, at: AT.getTime() }], new Map([[key, session]]));
+    await applyEvents(
+      d,
+      [{ type: "started", key, session, at: AT.getTime() }],
+      new Map([[key, session]]),
+    );
 
     expect(d.openSession).toHaveBeenCalledWith(d.db, expect.objectContaining({ isPaused: true }));
   });
@@ -74,7 +85,11 @@ describe("applyEvents", () => {
     const session = live();
     const key = snapshotKey("ps-1", "item-1");
 
-    await applyEvents(d, [{ type: "started", key, session, at: AT.getTime() }], new Map([[key, session]]));
+    await applyEvents(
+      d,
+      [{ type: "started", key, session, at: AT.getTime() }],
+      new Map([[key, session]]),
+    );
 
     expect(d.applyRollupDelta).not.toHaveBeenCalled();
   });
@@ -86,18 +101,33 @@ describe("applyEvents", () => {
 
     await applyEvents(
       d,
-      [{ type: "progressed", key, positionTicks: 50, watchedMs: 5_000, isPaused: false, at: AT.getTime() }],
+      [
+        {
+          type: "progressed",
+          key,
+          positionTicks: 50,
+          watchedMs: 5_000,
+          isPaused: false,
+          at: AT.getTime(),
+        },
+      ],
       new Map([[key, session]]),
     );
 
-    expect(d.touchSession).toHaveBeenCalledWith(d.db, expect.objectContaining({ watchedMs: 5_000, isPaused: false }));
-    expect(d.applyRollupDelta).toHaveBeenCalledWith(d.db, expect.objectContaining({
-      day: "2026-08-16",
-      userId: "user-1",
-      itemId: "item-1",
-      playCount: 0,
-      watchMs: 5_000,
-    }));
+    expect(d.touchSession).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({ watchedMs: 5_000, isPaused: false }),
+    );
+    expect(d.applyRollupDelta).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({
+        day: "2026-08-16",
+        userId: "user-1",
+        itemId: "item-1",
+        playCount: 0,
+        watchMs: 5_000,
+      }),
+    );
   });
 
   it("skips the rollup write when no time was credited", async () => {
@@ -107,7 +137,16 @@ describe("applyEvents", () => {
 
     await applyEvents(
       d,
-      [{ type: "progressed", key, positionTicks: 50, watchedMs: 0, isPaused: false, at: AT.getTime() }],
+      [
+        {
+          type: "progressed",
+          key,
+          positionTicks: 50,
+          watchedMs: 0,
+          isPaused: false,
+          at: AT.getTime(),
+        },
+      ],
       new Map([[key, session]]),
     );
 
@@ -126,11 +165,17 @@ describe("applyEvents", () => {
       new Map([[key, session]]),
     );
 
-    expect(d.closeSession).toHaveBeenCalledWith(d.db, expect.objectContaining({
-      runtimeTicks: 100,
-      completionThreshold: 0.9,
-    }));
-    expect(d.applyRollupDelta).toHaveBeenCalledWith(d.db, expect.objectContaining({ playCount: 1, watchMs: 2_000 }));
+    expect(d.closeSession).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({
+        runtimeTicks: 100,
+        completionThreshold: 0.9,
+      }),
+    );
+    expect(d.applyRollupDelta).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({ playCount: 1, watchMs: 2_000 }),
+    );
   });
 
   it("counts the play even though the stream is already gone from the payload", async () => {
@@ -139,25 +184,39 @@ describe("applyEvents", () => {
 
     // The stream vanished, so it is absent from the incoming payload — the common case,
     // and the reason the rollup must be driven by the returned row rather than the payload.
-    await applyEvents(d, [{ type: "ended", key, positionTicks: 95, watchedMs: 2_000, at: AT.getTime() }], new Map());
+    await applyEvents(
+      d,
+      [{ type: "ended", key, positionTicks: 95, watchedMs: 2_000, at: AT.getTime() }],
+      new Map(),
+    );
 
-    expect(d.closeSession).toHaveBeenCalledWith(d.db, expect.objectContaining({
-      sessionId: "ps-1",
-      itemId: "item-1",
-      runtimeTicks: null,
-    }));
-    expect(d.applyRollupDelta).toHaveBeenCalledWith(d.db, expect.objectContaining({
-      userId: "user-1",
-      playCount: 1,
-      watchMs: 2_000,
-    }));
+    expect(d.closeSession).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({
+        sessionId: "ps-1",
+        itemId: "item-1",
+        runtimeTicks: null,
+      }),
+    );
+    expect(d.applyRollupDelta).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({
+        userId: "user-1",
+        playCount: 1,
+        watchMs: 2_000,
+      }),
+    );
   });
 
   it("does not count the play again when the close finds no open row", async () => {
     const d = deps(null);
     const key = snapshotKey("ps-1", "item-1");
 
-    await applyEvents(d, [{ type: "ended", key, positionTicks: 95, watchedMs: 2_000, at: AT.getTime() }], new Map());
+    await applyEvents(
+      d,
+      [{ type: "ended", key, positionTicks: 95, watchedMs: 2_000, at: AT.getTime() }],
+      new Map(),
+    );
 
     expect(d.applyRollupDelta).not.toHaveBeenCalled();
   });
@@ -169,11 +228,23 @@ describe("applyEvents", () => {
 
     await applyEvents(
       d,
-      [{ type: "paused", key, positionTicks: 60, watchedMs: 5_000, isPaused: true, at: AT.getTime() }],
+      [
+        {
+          type: "paused",
+          key,
+          positionTicks: 60,
+          watchedMs: 5_000,
+          isPaused: true,
+          at: AT.getTime(),
+        },
+      ],
       new Map([[key, session]]),
     );
 
-    expect(d.touchSession).toHaveBeenCalledWith(d.db, expect.objectContaining({ isPaused: true, watchedMs: 5_000 }));
+    expect(d.touchSession).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({ isPaused: true, watchedMs: 5_000 }),
+    );
   });
 
   it("writes isPaused: true for a progressed event on a stream still paused from a prior poll", async () => {
@@ -187,7 +258,16 @@ describe("applyEvents", () => {
 
     await applyEvents(
       d,
-      [{ type: "progressed", key, positionTicks: 60, watchedMs: 0, isPaused: true, at: AT.getTime() }],
+      [
+        {
+          type: "progressed",
+          key,
+          positionTicks: 60,
+          watchedMs: 0,
+          isPaused: true,
+          at: AT.getTime(),
+        },
+      ],
       new Map([[key, session]]),
     );
 
@@ -204,12 +284,24 @@ describe("applyEvents", () => {
 
     await applyEvents(
       d,
-      [{ type: "progressed", key, positionTicks: 50, watchedMs: 5_000, isPaused: false, at: afterMidnight }],
+      [
+        {
+          type: "progressed",
+          key,
+          positionTicks: 50,
+          watchedMs: 5_000,
+          isPaused: false,
+          at: afterMidnight,
+        },
+      ],
       new Map([[key, session]]),
     );
 
     // recomputeRollupRange groups by started_at::date, so the incremental path must
     // agree or the nightly job would silently move this stream to a different day.
-    expect(d.applyRollupDelta).toHaveBeenCalledWith(d.db, expect.objectContaining({ day: "2026-08-16" }));
+    expect(d.applyRollupDelta).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({ day: "2026-08-16" }),
+    );
   });
 });

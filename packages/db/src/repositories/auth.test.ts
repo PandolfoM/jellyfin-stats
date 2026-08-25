@@ -46,15 +46,27 @@ describe("session repository", () => {
         expiresAt: new Date(now.getTime() + HOUR),
       });
 
-      const found = await selectLiveSession(db, "sess-nonadmin", now, new Date(now.getTime() + HOUR));
-      expect(found).toEqual({ userId: "user-5", userName: "hopper", isAdmin: false, createdAt: now });
+      const found = await selectLiveSession(
+        db,
+        "sess-nonadmin",
+        now,
+        new Date(now.getTime() + HOUR),
+      );
+      expect(found).toEqual({
+        userId: "user-5",
+        userName: "hopper",
+        isAdmin: false,
+        createdAt: now,
+      });
     });
   });
 
   it("returns null for an unknown id", async () => {
     await withTestDatabase(async (db) => {
       const now = new Date("2026-08-18T12:00:00Z");
-      expect(await selectLiveSession(db, "sess-nope", now, new Date(now.getTime() + HOUR))).toBeNull();
+      expect(
+        await selectLiveSession(db, "sess-nope", now, new Date(now.getTime() + HOUR)),
+      ).toBeNull();
     });
   });
 
@@ -145,7 +157,9 @@ describe("session repository", () => {
         expiresAt: new Date(now.getTime() + HOUR),
       });
       await deleteSession(db, "sess-bye");
-      expect(await selectLiveSession(db, "sess-bye", now, new Date(now.getTime() + HOUR))).toBeNull();
+      expect(
+        await selectLiveSession(db, "sess-bye", now, new Date(now.getTime() + HOUR)),
+      ).toBeNull();
     });
   });
 
@@ -170,7 +184,9 @@ describe("session repository", () => {
       });
 
       expect(await deleteExpiredSessions(db, now)).toBe(1);
-      expect(await selectLiveSession(db, "keep", now, new Date(now.getTime() + HOUR))).not.toBeNull();
+      expect(
+        await selectLiveSession(db, "keep", now, new Date(now.getTime() + HOUR)),
+      ).not.toBeNull();
     });
   });
 });

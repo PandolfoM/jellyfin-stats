@@ -12,11 +12,12 @@ const AUTH_OK = {
 };
 
 function clientWith(payload: unknown, status = 200) {
-  const fetchMock = vi.fn<typeof fetch>(async () =>
-    new Response(status === 204 ? null : JSON.stringify(payload), {
-      status,
-      headers: { "content-type": "application/json" },
-    }),
+  const fetchMock = vi.fn<typeof fetch>(
+    async () =>
+      new Response(status === 204 ? null : JSON.stringify(payload), {
+        status,
+        headers: { "content-type": "application/json" },
+      }),
   );
   const client = createJellyfinClient({
     baseUrl: "http://jellyfin.test:8096",
@@ -65,7 +66,9 @@ describe("authenticateByName", () => {
     const [, init] = fetchMock.mock.calls[0] ?? [];
     const auth = (init as RequestInit).headers as Record<string, string>;
     // Jellyfin rejects AuthenticateByName without Client/Device/DeviceId/Version.
-    expect(auth.Authorization).toMatch(/MediaBrowser Client=".+", Device=".+", DeviceId=".+", Version=".+"/);
+    expect(auth.Authorization).toMatch(
+      /MediaBrowser Client=".+", Device=".+", DeviceId=".+", Version=".+"/,
+    );
   });
 
   it("never puts the password in the URL", async () => {
@@ -124,7 +127,9 @@ describe("authenticateByName", () => {
     await expect(client.authenticateByName("test-admin", "secret")).rejects.toMatchObject({
       kind: "unreachable",
     });
-    await expect(client.authenticateByName("test-admin", "secret")).rejects.toBeInstanceOf(JellyfinAuthError);
+    await expect(client.authenticateByName("test-admin", "secret")).rejects.toBeInstanceOf(
+      JellyfinAuthError,
+    );
   });
 
   it("treats valid JSON that fails the schema as unreachable", async () => {

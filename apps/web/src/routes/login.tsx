@@ -6,7 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 
 const ERROR_MESSAGES: Record<LoginErrorCode, string> = {
   invalid_credentials: "That username or password was not accepted by Jellyfin.",
-  not_an_administrator: "That account is not a Jellyfin administrator. This dashboard is admin-only.",
+  not_an_administrator:
+    "That account is not a Jellyfin administrator. This dashboard is admin-only.",
   too_many_attempts: "Too many attempts. Wait a few minutes and try again.",
   jellyfin_unavailable: "Could not reach your Jellyfin server. Check that it is running.",
   unknown_error: "Something went wrong signing in. Try again.",
@@ -49,7 +50,11 @@ export function LoginRoute() {
           <CardDescription>Sign in with your Jellyfin administrator account.</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={(event) => void handleSubmit(event)} className="flex flex-col gap-4" noValidate>
+          <form
+            onSubmit={(event) => void handleSubmit(event)}
+            className="flex flex-col gap-4"
+            noValidate
+          >
             <div className="flex flex-col gap-1.5">
               <label htmlFor="username" className="text-sm font-medium">
                 Username

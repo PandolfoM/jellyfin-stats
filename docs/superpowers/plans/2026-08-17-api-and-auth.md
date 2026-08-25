@@ -65,11 +65,13 @@ Modified: `packages/shared/src/env.ts` (two new variables), `packages/jellyfin/s
 Gets a server running with a health route, so every later task has somewhere to add routes and something to curl.
 
 **Files:**
+
 - Create: `apps/server/src/api/app.ts`, `apps/server/src/api.ts`
 - Modify: `apps/server/package.json`
 - Test: `apps/server/src/api/app.test.ts`
 
 **Interfaces:**
+
 - Consumes: `createContext(env): AppContext` and `closeContext(context)` from `apps/server/src/context.js`; `loadEnv()` from `@jfstats/shared`.
 - Produces:
   - `createApp(context: AppContext): Hono<{ Variables: AppVariables }>` — the assembled app, used by every route task and by the tests.
@@ -252,11 +254,13 @@ the worker's endsWith(\".ts\") guard silently no-ops under node dist/."
 Adds `authenticateByName` and `revokeToken` to the Jellyfin client. **This task must be verified against the real server** — Plan 1's most expensive defect came from trusting a documented field that does not exist.
 
 **Files:**
+
 - Create: `packages/jellyfin/src/auth.ts`
 - Modify: `packages/jellyfin/src/client.ts`, `packages/jellyfin/src/index.ts`
 - Test: `packages/jellyfin/src/auth.test.ts`
 
 **Interfaces:**
+
 - Consumes: `createJellyfinClient(options)` and its private `request` helper pattern.
 - Produces, added to the `JellyfinClient` interface:
   - `authenticateByName(username: string, password: string): Promise<JellyfinAuthResult>`
@@ -285,11 +289,12 @@ const AUTH_OK = {
 };
 
 function clientWith(payload: unknown, status = 200) {
-  const fetchMock = vi.fn(async () =>
-    new Response(status === 204 ? null : JSON.stringify(payload), {
-      status,
-      headers: { "content-type": "application/json" },
-    }),
+  const fetchMock = vi.fn(
+    async () =>
+      new Response(status === 204 ? null : JSON.stringify(payload), {
+        status,
+        headers: { "content-type": "application/json" },
+      }),
   );
   const client = createJellyfinClient({
     baseUrl: "http://jellyfin.test:8096",
@@ -326,7 +331,9 @@ describe("authenticateByName", () => {
     const [, init] = fetchMock.mock.calls[0] ?? [];
     const auth = (init as RequestInit).headers as Record<string, string>;
     // Jellyfin rejects AuthenticateByName without Client/Device/DeviceId/Version.
-    expect(auth.Authorization).toMatch(/MediaBrowser Client=".+", Device=".+", DeviceId=".+", Version=".+"/);
+    expect(auth.Authorization).toMatch(
+      /MediaBrowser Client=".+", Device=".+", DeviceId=".+", Version=".+"/,
+    );
   });
 
   it("never puts the password in the URL", async () => {
@@ -583,10 +590,12 @@ that already succeeded."
 ### Task 3: Redis session store and login rate limiter
 
 **Files:**
+
 - Create: `apps/server/src/api/sessions.ts`, `apps/server/src/api/rate-limit.ts`
 - Test: `apps/server/src/api/sessions.test.ts`, `apps/server/src/api/rate-limit.test.ts`
 
 **Interfaces:**
+
 - Consumes: an `ioredis` client (from `AppContext.redis`).
 - Produces:
   - `createSessionStore(redis: Redis, ttlSeconds?: number): SessionStore`
@@ -596,6 +605,7 @@ that already succeeded."
   - `interface RateLimiter { check(key: string): Promise<{ allowed: boolean; remaining: number }> }`
 
 **Design points:**
+
 - Session ids are **cryptographically random**, not derived from user data — a guessable id is a login bypass. Use `randomBytes(32).toString("base64url")`.
 - `get` **slides the TTL** on a hit, so an active admin is not logged out mid-session.
 - The limiter is a fixed window keyed by IP. It counts on every check, so repeated failures compound.
@@ -859,10 +869,12 @@ The limiter keys on the caller so one attacker cannot lock out everyone."
 Two new environment variables, and one decision that is easy to get wrong: `Secure` cookies do not survive plain HTTP, which is how most people first run a self-hosted app.
 
 **Files:**
+
 - Modify: `packages/shared/src/env.ts`, `.env.example`
 - Test: `packages/shared/src/env.test.ts`
 
 **Interfaces:**
+
 - Produces on `AppEnv`: `COOKIE_SECURE: boolean` (default `false`) and `SESSION_TTL_HOURS: number` (default `168`).
 
 - [ ] **Step 1: Add the failing tests**
@@ -943,15 +955,18 @@ The README directs turning it on behind TLS."
 ### Task 5: Authentication routes
 
 **Files:**
+
 - Create: `apps/server/src/api/routes/auth.ts`
 - Modify: `apps/server/src/api/app.ts`
 - Test: `apps/server/src/api/routes/auth.test.ts`
 
 **Interfaces:**
+
 - Consumes: `authenticateByName`, `revokeToken`, `JellyfinAuthError` (Task 2); `createSessionStore`, `createRateLimiter` (Task 3); `COOKIE_SECURE`, `SESSION_TTL_HOURS`, `fallbackAdminEnabled` (Task 4 / Plan 1).
 - Produces: `registerAuthRoutes(app, deps: AuthDeps): void` mounting `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`; and `SESSION_COOKIE = "jfstats_session"`.
 
 **Behavior the tests pin down:**
+
 - A valid **non-admin** Jellyfin account is rejected with 403, and **no session is created**.
 - The Jellyfin access token is revoked immediately on successful login — the app already has its own API key; holding a second credential is liability.
 - Wrong password → 401; Jellyfin unreachable → 503. Different problems, different answers.
@@ -1218,7 +1233,10 @@ import type { RateLimiter } from "../rate-limit.js";
 export const SESSION_COOKIE = "jfstats_session";
 
 export interface AuthDeps {
-  authenticateByName(username: string, password: string): Promise<{
+  authenticateByName(
+    username: string,
+    password: string,
+  ): Promise<{
     userId: string;
     userName: string;
     isAdmin: boolean;
@@ -1240,7 +1258,9 @@ const loginSchema = z.object({
 export function registerAuthRoutes(app: Hono, deps: AuthDeps): void {
   app.post("/api/auth/login", async (c) => {
     const clientKey =
-      c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? c.req.header("x-real-ip") ?? "unknown";
+      c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ??
+      c.req.header("x-real-ip") ??
+      "unknown";
 
     const limit = await deps.rateLimiter.check(clientKey);
     if (!limit.allowed) {
@@ -1346,26 +1366,26 @@ function writeSessionCookie(
 In `createApp`, after the health route:
 
 ```ts
-  const sessions = createSessionStore(context.redis, context.env.SESSION_TTL_HOURS * 60 * 60);
-  const rateLimiter = createRateLimiter(context.redis, { limit: 10, windowSeconds: 900 });
+const sessions = createSessionStore(context.redis, context.env.SESSION_TTL_HOURS * 60 * 60);
+const rateLimiter = createRateLimiter(context.redis, { limit: 10, windowSeconds: 900 });
 
-  registerAuthRoutes(app, {
-    authenticateByName: (u, p) => context.jellyfin.authenticateByName(u, p),
-    revokeToken: (t) => context.jellyfin.revokeToken(t),
-    sessions,
-    rateLimiter,
-    cookieSecure: context.env.COOKIE_SECURE,
-    sessionTtlHours: context.env.SESSION_TTL_HOURS,
-    fallbackAdmin:
-      context.env.fallbackAdminEnabled &&
-      context.env.FALLBACK_ADMIN_USER !== undefined &&
-      context.env.FALLBACK_ADMIN_PASSWORD !== undefined
-        ? {
-            username: context.env.FALLBACK_ADMIN_USER,
-            password: context.env.FALLBACK_ADMIN_PASSWORD,
-          }
-        : null,
-  });
+registerAuthRoutes(app, {
+  authenticateByName: (u, p) => context.jellyfin.authenticateByName(u, p),
+  revokeToken: (t) => context.jellyfin.revokeToken(t),
+  sessions,
+  rateLimiter,
+  cookieSecure: context.env.COOKIE_SECURE,
+  sessionTtlHours: context.env.SESSION_TTL_HOURS,
+  fallbackAdmin:
+    context.env.fallbackAdminEnabled &&
+    context.env.FALLBACK_ADMIN_USER !== undefined &&
+    context.env.FALLBACK_ADMIN_PASSWORD !== undefined
+      ? {
+          username: context.env.FALLBACK_ADMIN_USER,
+          password: context.env.FALLBACK_ADMIN_PASSWORD,
+        }
+      : null,
+});
 ```
 
 The existing `app.test.ts` context stub will need `redis` and the new env fields; extend it minimally rather than making it a real connection.
@@ -1405,10 +1425,12 @@ when Jellyfin cannot be reached."
 ### Task 6: Admin middleware
 
 **Files:**
+
 - Create: `apps/server/src/api/middleware/auth.ts`
 - Test: `apps/server/src/api/middleware/auth.test.ts`
 
 **Interfaces:**
+
 - Produces: `requireAdmin(sessions: SessionStore)` — Hono middleware setting `c.var.session` to a `SessionRecord`, or answering 401.
 
 - [ ] **Step 1: Write the failing test**
@@ -1536,11 +1558,13 @@ stored session record is never sufficient on its own to grant access."
 Aggregate reads over `playback_rollup_daily`. Dashboards must never scan `playback_sessions` — that is the performance decision the whole rollup exists for.
 
 **Files:**
+
 - Create: `packages/db/src/repositories/stats.ts`
 - Modify: `packages/db/src/index.ts`
 - Test: `packages/db/src/repositories/stats.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Db`, `playbackRollupDaily`, `items`, `jellyfinUsers`, `libraries`, and `withTestDatabase` from `@jfstats/db/testing`.
 - Produces:
   - `interface DateRange { from: string; to: string }` — inclusive `YYYY-MM-DD` UTC days
@@ -1550,6 +1574,7 @@ Aggregate reads over `playback_rollup_daily`. Dashboards must never scan `playba
   - `interface TopItem { itemId: string; name: string; type: string; libraryId: string | null; seriesId: string | null; imageTag: string | null; plays: number; watchMs: number }`
 
 **Design points:**
+
 - The series must include **days with no activity as zero rows**, or a chart will silently connect across gaps and misrepresent a quiet week. Generate the day spine in SQL.
 - Every function takes an explicit range; there is no implicit "last 30 days" hidden in a query.
 
@@ -1576,16 +1601,56 @@ async function seed(db: Db): Promise<void> {
     { id: "user-b", name: "beta", isAdmin: false },
   ]);
   await db.insert(items).values([
-    { id: "item-1", name: "First Movie", type: "Movie", libraryId: "lib-movies", imageTag: "tag-1" },
+    {
+      id: "item-1",
+      name: "First Movie",
+      type: "Movie",
+      libraryId: "lib-movies",
+      imageTag: "tag-1",
+    },
     { id: "item-2", name: "Second Movie", type: "Movie", libraryId: "lib-movies" },
-    { id: "item-3", name: "An Episode", type: "Episode", libraryId: "lib-shows", seriesId: "series-1" },
+    {
+      id: "item-3",
+      name: "An Episode",
+      type: "Episode",
+      libraryId: "lib-shows",
+      seriesId: "series-1",
+    },
   ]);
   await db.insert(playbackRollupDaily).values([
-    { day: "2026-08-10", userId: "user-a", itemId: "item-1", libraryId: "lib-movies", playCount: 2, watchMs: 60_000 },
-    { day: "2026-08-10", userId: "user-b", itemId: "item-2", libraryId: "lib-movies", playCount: 1, watchMs: 30_000 },
-    { day: "2026-08-12", userId: "user-a", itemId: "item-3", libraryId: "lib-shows", playCount: 3, watchMs: 90_000 },
+    {
+      day: "2026-08-10",
+      userId: "user-a",
+      itemId: "item-1",
+      libraryId: "lib-movies",
+      playCount: 2,
+      watchMs: 60_000,
+    },
+    {
+      day: "2026-08-10",
+      userId: "user-b",
+      itemId: "item-2",
+      libraryId: "lib-movies",
+      playCount: 1,
+      watchMs: 30_000,
+    },
+    {
+      day: "2026-08-12",
+      userId: "user-a",
+      itemId: "item-3",
+      libraryId: "lib-shows",
+      playCount: 3,
+      watchMs: 90_000,
+    },
     // Outside every range used below.
-    { day: "2026-07-01", userId: "user-a", itemId: "item-1", libraryId: "lib-movies", playCount: 9, watchMs: 999_000 },
+    {
+      day: "2026-07-01",
+      userId: "user-a",
+      itemId: "item-1",
+      libraryId: "lib-movies",
+      playCount: 9,
+      watchMs: 999_000,
+    },
   ]);
 }
 
@@ -1674,7 +1739,13 @@ describe("getTopItems", () => {
 
       const top = await getTopItems(db, RANGE, { limit: 10 });
 
-      expect(top[0]).toMatchObject({ itemId: "item-3", name: "An Episode", type: "Episode", plays: 3, watchMs: 90_000 });
+      expect(top[0]).toMatchObject({
+        itemId: "item-3",
+        name: "An Episode",
+        type: "Episode",
+        plays: 3,
+        watchMs: 90_000,
+      });
       expect(top[1]).toMatchObject({ itemId: "item-1", name: "First Movie", watchMs: 60_000 });
       expect(top).toHaveLength(3);
     });
@@ -1893,10 +1964,12 @@ exceeding Number.MAX_SAFE_INTEGER would silently lose precision."
 ### Task 8: Per-user and per-library repositories
 
 **Files:**
+
 - Modify: `packages/db/src/repositories/stats.ts`
 - Test: `packages/db/src/repositories/stats.test.ts`
 
 **Interfaces:**
+
 - Produces:
   - `getUserStats(db, range: DateRange): Promise<UserStat[]>` where `interface UserStat { userId: string; name: string; isAdmin: boolean; plays: number; watchMs: number }`
   - `getLibraryStats(db, range: DateRange): Promise<LibraryStat[]>` where `interface LibraryStat { libraryId: string; name: string; collectionType: string | null; plays: number; watchMs: number }`
@@ -1952,7 +2025,12 @@ describe("getLibraryStats", () => {
       const stats = await getLibraryStats(db, { from: "2026-08-12", to: "2026-08-12" });
 
       expect(stats).toEqual([
-        expect.objectContaining({ libraryId: "lib-shows", name: "Shows", plays: 3, watchMs: 90_000 }),
+        expect.objectContaining({
+          libraryId: "lib-shows",
+          name: "Shows",
+          plays: 3,
+          watchMs: 90_000,
+        }),
         expect.objectContaining({ libraryId: "lib-movies", name: "Movies", plays: 0, watchMs: 0 }),
       ]);
     });
@@ -2169,17 +2247,20 @@ deliberately does not carry device identity."
 The one read that legitimately touches `playback_sessions`, because history is per-session by definition.
 
 **Files:**
+
 - Create: `packages/db/src/repositories/history.ts`
 - Modify: `packages/db/src/index.ts`
 - Test: `packages/db/src/repositories/history.test.ts`
 
 **Interfaces:**
+
 - Produces:
   - `getHistory(db, options: HistoryOptions): Promise<{ rows: HistoryRow[]; total: number }>`
   - `interface HistoryOptions { limit: number; offset: number; userId?: string; libraryId?: string; from?: string; to?: string }`
   - `interface HistoryRow { id: string; userId: string; userName: string; itemId: string; itemName: string; itemType: string; seriesId: string | null; libraryId: string | null; deviceName: string | null; client: string | null; playMethod: string | null; startedAt: Date; endedAt: Date | null; watchMs: number; completed: boolean }`
 
 **Design points:**
+
 - Returns `total` alongside the page so a UI can render "showing 1–50 of 812" without a second endpoint.
 - `limit` is **clamped in the repository**, not trusted from the caller — an unbounded limit is a trivial denial of service.
 - Ordered by `started_at DESC`, which the `playback_sessions_user_started_idx` index supports.
@@ -2294,8 +2375,18 @@ describe("getHistory", () => {
     await withTestDatabase(async (db) => {
       await seed(db);
 
-      const inRange = await getHistory(db, { limit: 50, offset: 0, from: "2026-08-16", to: "2026-08-16" });
-      const outOfRange = await getHistory(db, { limit: 50, offset: 0, from: "2026-08-17", to: "2026-08-18" });
+      const inRange = await getHistory(db, {
+        limit: 50,
+        offset: 0,
+        from: "2026-08-16",
+        to: "2026-08-16",
+      });
+      const outOfRange = await getHistory(db, {
+        limit: 50,
+        offset: 0,
+        from: "2026-08-17",
+        to: "2026-08-18",
+      });
 
       expect(inRange.total).toBe(5);
       expect(outOfRange.total).toBe(0);
@@ -2479,11 +2570,13 @@ with a placeholder rather than disappearing."
 ### Task 10: Statistics and history routes
 
 **Files:**
+
 - Create: `apps/server/src/api/routes/stats.ts`, `apps/server/src/api/routes/history.ts`
 - Modify: `apps/server/src/api/app.ts`
 - Test: `apps/server/src/api/routes/stats.test.ts`
 
 **Interfaces:**
+
 - Produces: `registerStatsRoutes(app, deps: StatsDeps)` and `registerHistoryRoutes(app, deps: HistoryDeps)`, mounting:
   - `GET /api/stats/overview?from&to`
   - `GET /api/stats/series?from&to`
@@ -2495,6 +2588,7 @@ with a placeholder rather than disappearing."
 - Also produces `parseRange(query): DateRange` — shared date parsing with a **30-day default**.
 
 **Design points:**
+
 - Every route is behind `requireAdmin`.
 - Dates are validated with a strict `YYYY-MM-DD` regex; a malformed date is a 400, never a silent default, because silently substituting a range makes a wrong chart look correct.
 - `from` after `to` is a 400.
@@ -2621,13 +2715,24 @@ Expected: FAIL — cannot resolve `./stats.js`.
 - [ ] **Step 3: Implement `routes/stats.ts`**
 
 ```ts
-import type { DateRange, LibraryStat, OverviewStats, SeriesPoint, TopItem, UserDetail, UserStat } from "@jfstats/db";
+import type {
+  DateRange,
+  LibraryStat,
+  OverviewStats,
+  SeriesPoint,
+  TopItem,
+  UserDetail,
+  UserStat,
+} from "@jfstats/db";
 import type { Hono } from "hono";
 
 export interface StatsDeps {
   getOverview(range: DateRange): Promise<OverviewStats>;
   getWatchTimeSeries(range: DateRange): Promise<SeriesPoint[]>;
-  getTopItems(range: DateRange, options: { limit: number; libraryId?: string; userId?: string }): Promise<TopItem[]>;
+  getTopItems(
+    range: DateRange,
+    options: { limit: number; libraryId?: string; userId?: string },
+  ): Promise<TopItem[]>;
   getUserStats(range: DateRange): Promise<UserStat[]>;
   getUserDetail(userId: string, range: DateRange): Promise<UserDetail | null>;
   getLibraryStats(range: DateRange): Promise<LibraryStat[]>;
@@ -2674,7 +2779,8 @@ export function parseRange(
 }
 
 export function registerStatsRoutes(app: Hono, deps: StatsDeps): void {
-  const withRange = <T>(handler: (range: DateRange) => Promise<T>) =>
+  const withRange =
+    <T>(handler: (range: DateRange) => Promise<T>) =>
     async (c: Parameters<Parameters<Hono["get"]>[1]>[0]) => {
       let range: DateRange;
       try {
@@ -2686,10 +2792,22 @@ export function registerStatsRoutes(app: Hono, deps: StatsDeps): void {
       return c.json(await handler(range));
     };
 
-  app.get("/api/stats/overview", withRange((range) => deps.getOverview(range)));
-  app.get("/api/stats/series", withRange((range) => deps.getWatchTimeSeries(range)));
-  app.get("/api/stats/users", withRange((range) => deps.getUserStats(range)));
-  app.get("/api/stats/libraries", withRange((range) => deps.getLibraryStats(range)));
+  app.get(
+    "/api/stats/overview",
+    withRange((range) => deps.getOverview(range)),
+  );
+  app.get(
+    "/api/stats/series",
+    withRange((range) => deps.getWatchTimeSeries(range)),
+  );
+  app.get(
+    "/api/stats/users",
+    withRange((range) => deps.getUserStats(range)),
+  );
+  app.get(
+    "/api/stats/libraries",
+    withRange((range) => deps.getLibraryStats(range)),
+  );
 
   app.get("/api/stats/top-items", async (c) => {
     let range: DateRange;
@@ -2780,19 +2898,19 @@ export function registerHistoryRoutes(app: Hono, deps: HistoryDeps): void {
 In `createApp`, after the auth routes:
 
 ```ts
-  app.use("/api/stats/*", requireAdmin(sessions));
-  app.use("/api/history", requireAdmin(sessions));
+app.use("/api/stats/*", requireAdmin(sessions));
+app.use("/api/history", requireAdmin(sessions));
 
-  registerStatsRoutes(app, {
-    getOverview: (range) => getOverview(context.db, range),
-    getWatchTimeSeries: (range) => getWatchTimeSeries(context.db, range),
-    getTopItems: (range, options) => getTopItems(context.db, range, options),
-    getUserStats: (range) => getUserStats(context.db, range),
-    getUserDetail: (userId, range) => getUserDetail(context.db, userId, range),
-    getLibraryStats: (range) => getLibraryStats(context.db, range),
-  });
+registerStatsRoutes(app, {
+  getOverview: (range) => getOverview(context.db, range),
+  getWatchTimeSeries: (range) => getWatchTimeSeries(context.db, range),
+  getTopItems: (range, options) => getTopItems(context.db, range, options),
+  getUserStats: (range) => getUserStats(context.db, range),
+  getUserDetail: (userId, range) => getUserDetail(context.db, userId, range),
+  getLibraryStats: (range) => getLibraryStats(context.db, range),
+});
 
-  registerHistoryRoutes(app, { getHistory: (options) => getHistory(context.db, options) });
+registerHistoryRoutes(app, { getHistory: (options) => getHistory(context.db, options) });
 ```
 
 Add a test in `app.test.ts` asserting `GET /api/stats/overview` **without a cookie returns 401** — that is the proof the gate is actually mounted, not merely written.
@@ -2821,15 +2939,18 @@ Result limits are clamped at the route as well as in the repository."
 The worker already publishes each poll's session list to a Redis channel. This exposes it to the browser.
 
 **Files:**
+
 - Create: `apps/server/src/api/routes/live.ts`
 - Modify: `apps/server/src/api/app.ts`
 - Test: `apps/server/src/api/routes/live.test.ts`
 
 **Interfaces:**
+
 - Consumes: `LIVE_CHANNEL` from `apps/server/src/sync/snapshot-store.js`.
 - Produces: `registerLiveRoute(app, deps: LiveDeps)` mounting `GET /api/live`, and `interface LiveDeps { subscribe(onMessage: (payload: string) => void): Promise<() => Promise<void>>; loadCurrent(): Promise<LiveSession[]> }`.
 
 **Design points — each of these is a real failure mode, not ceremony:**
+
 - **A dedicated Redis connection.** An ioredis client in subscriber mode cannot run ordinary commands, so reusing `context.redis` would break the session store on the first SSE connection.
 - **Send the current snapshot immediately on connect**, or the page shows nothing until the next poll — up to a full interval of apparent emptiness.
 - **Heartbeat comments**, or an idle proxy closes the stream after 30–60s.
@@ -2965,7 +3086,10 @@ export function registerLiveRoute(app: Hono, deps: LiveDeps): void {
       // Send what is playing right now. Without this the page is blank until the
       // worker's next poll, which looks like nothing is playing.
       try {
-        await stream.writeSSE({ event: "sessions", data: JSON.stringify(await deps.loadCurrent()) });
+        await stream.writeSSE({
+          event: "sessions",
+          data: JSON.stringify(await deps.loadCurrent()),
+        });
       } catch {
         await stream.writeSSE({ event: "sessions", data: "[]" });
       }
@@ -2996,22 +3120,22 @@ export function registerLiveRoute(app: Hono, deps: LiveDeps): void {
 In `createApp`:
 
 ```ts
-  registerLiveRoute(app, {
-    loadCurrent: async () => {
-      const snapshot = await context.snapshots.load();
-      return Object.values(snapshot) as unknown as LiveSession[];
-    },
-    subscribe: async (onMessage) => {
-      // A subscribed ioredis client cannot run ordinary commands. Sharing
-      // context.redis would break the session store on the first SSE connection.
-      const subscriber = context.redis.duplicate();
-      await subscriber.subscribe(LIVE_CHANNEL);
-      subscriber.on("message", (_channel, payload) => onMessage(payload));
-      return async () => {
-        await subscriber.quit();
-      };
-    },
-  });
+registerLiveRoute(app, {
+  loadCurrent: async () => {
+    const snapshot = await context.snapshots.load();
+    return Object.values(snapshot) as unknown as LiveSession[];
+  },
+  subscribe: async (onMessage) => {
+    // A subscribed ioredis client cannot run ordinary commands. Sharing
+    // context.redis would break the session store on the first SSE connection.
+    const subscriber = context.redis.duplicate();
+    await subscriber.subscribe(LIVE_CHANNEL);
+    subscriber.on("message", (_channel, payload) => onMessage(payload));
+    return async () => {
+      await subscriber.quit();
+    };
+  },
+});
 ```
 
 **Note for the implementer:** `snapshots.load()` returns a `SessionSnapshot` (a keyed record of `SessionSnapshotEntry`), which is **not** the same shape as `LiveSession[]`. Read `apps/server/src/sync/snapshot-store.ts` and decide honestly: either add a `loadLive()` to the snapshot store that keeps the full `LiveSession` payload, or have the worker publish and cache the full list. **Do not cast between the two shapes** — report the mismatch and your chosen fix in your report. The cast above is deliberately left as a marker; replacing it is part of this task.
@@ -3038,14 +3162,17 @@ connection."
 ### Task 12: Poster image proxy
 
 **Files:**
+
 - Create: `apps/server/src/api/routes/images.ts`
 - Modify: `apps/server/src/api/app.ts`
 - Test: `apps/server/src/api/routes/images.test.ts`
 
 **Interfaces:**
+
 - Produces: `registerImageRoutes(app, deps: ImageDeps)` mounting `GET /api/images/items/:itemId`, and `interface ImageDeps { fetchImage(itemId: string, options: { tag?: string; maxWidth: number }): Promise<Response> }`.
 
 **Design points:**
+
 - The proxy exists so the browser never needs the Jellyfin API key or direct network access to the server.
 - It must be **behind the admin gate**. An open image proxy lets anyone enumerate a private media library.
 - `maxWidth` is clamped — an unbounded value makes Jellyfin transcode arbitrarily large images on demand.
@@ -3062,7 +3189,8 @@ import { registerImageRoutes, type ImageDeps } from "./images.js";
 function build(overrides: Partial<ImageDeps> = {}) {
   const deps: ImageDeps = {
     fetchImage: vi.fn(
-      async () => new Response("binary", { status: 200, headers: { "content-type": "image/jpeg" } }),
+      async () =>
+        new Response("binary", { status: 200, headers: { "content-type": "image/jpeg" } }),
     ),
     ...overrides,
   };
@@ -3086,7 +3214,10 @@ describe("GET /api/images/items/:itemId", () => {
 
     await app.request("/api/images/items/item-1?tag=abc123");
 
-    expect(deps.fetchImage).toHaveBeenCalledWith("item-1", expect.objectContaining({ tag: "abc123" }));
+    expect(deps.fetchImage).toHaveBeenCalledWith(
+      "item-1",
+      expect.objectContaining({ tag: "abc123" }),
+    );
   });
 
   it("clamps maxWidth so a caller cannot force huge transcodes", async () => {
@@ -3198,20 +3329,20 @@ export function registerImageRoutes(app: Hono, deps: ImageDeps): void {
 In `createApp`, before the route registration:
 
 ```ts
-  app.use("/api/images/*", requireAdmin(sessions));
+app.use("/api/images/*", requireAdmin(sessions));
 
-  registerImageRoutes(app, {
-    fetchImage: async (itemId, options) => {
-      const url = new URL(`${context.env.JELLYFIN_URL}/Items/${itemId}/Images/Primary`);
-      url.searchParams.set("maxWidth", String(options.maxWidth));
-      if (options.tag !== undefined) url.searchParams.set("tag", options.tag);
+registerImageRoutes(app, {
+  fetchImage: async (itemId, options) => {
+    const url = new URL(`${context.env.JELLYFIN_URL}/Items/${itemId}/Images/Primary`);
+    url.searchParams.set("maxWidth", String(options.maxWidth));
+    if (options.tag !== undefined) url.searchParams.set("tag", options.tag);
 
-      return fetch(url, {
-        headers: { Authorization: `MediaBrowser Token="${context.env.JELLYFIN_API_KEY}"` },
-        signal: AbortSignal.timeout(15_000),
-      });
-    },
-  });
+    return fetch(url, {
+      headers: { Authorization: `MediaBrowser Token="${context.env.JELLYFIN_API_KEY}"` },
+      signal: AbortSignal.timeout(15_000),
+    });
+  },
+});
 ```
 
 Add a test to `app.test.ts` asserting `GET /api/images/items/x` without a cookie is 401 — an open image proxy would let anyone enumerate a private library.
@@ -3237,6 +3368,7 @@ returned, since they can name an internal host."
 ### Task 13: Compose service, README, and end-to-end verification
 
 **Files:**
+
 - Modify: `docker-compose.yml`, `README.md`, `apps/server/package.json`
 - Test: `apps/server/src/api/app.test.ts` (gate assertions)
 

@@ -69,7 +69,12 @@ export function PlaybackHistoryTable({
   }
 
   if (rows.length === 0) {
-    return <EmptyState title="No playback history" description="No sessions match the selected filters." />;
+    return (
+      <EmptyState
+        title="No playback history"
+        description="No sessions match the selected filters."
+      />
+    );
   }
 
   // `total` is the count across the whole filtered set, not just this page
@@ -100,13 +105,19 @@ export function PlaybackHistoryTable({
         <TableBody>
           {rows.map((row) => (
             <TableRow key={row.id} data-testid="playback-history-row" data-row-id={row.id}>
-              <TableCell className="text-muted-foreground">{formatDay(row.startedAt.slice(0, 10))}</TableCell>
-              <TableCell className="max-w-64 truncate font-medium text-foreground">{row.itemName}</TableCell>
+              <TableCell className="text-muted-foreground">
+                {formatDay(row.startedAt.slice(0, 10))}
+              </TableCell>
+              <TableCell className="max-w-64 truncate font-medium text-foreground">
+                {row.itemName}
+              </TableCell>
               <TableCell>
                 <Badge variant="secondary">{row.itemType}</Badge>
               </TableCell>
               <TableCell>{row.userName}</TableCell>
-              <TableCell className="text-muted-foreground">{row.deviceName ?? row.client ?? "—"}</TableCell>
+              <TableCell className="text-muted-foreground">
+                {row.deviceName ?? row.client ?? "—"}
+              </TableCell>
               <TableCell className="text-right">{formatDuration(row.watchMs)}</TableCell>
               <TableCell>{row.completed ? "Yes" : "No"}</TableCell>
             </TableRow>
@@ -128,7 +139,13 @@ export function PlaybackHistoryTable({
           >
             Previous
           </Button>
-          <Button type="button" variant="outline" size="sm" disabled={!hasNext} onClick={() => onPageChange(page + 1)}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!hasNext}
+            onClick={() => onPageChange(page + 1)}
+          >
             Next
           </Button>
         </div>

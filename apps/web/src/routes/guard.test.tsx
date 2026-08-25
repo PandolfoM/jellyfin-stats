@@ -46,10 +46,13 @@ function mockAuthMeAndOverviewQueries(respond: () => Response | Promise<Response
       const url = String(input instanceof Request ? input.url : input);
       if (url.includes("/api/auth/me")) return respond();
       if (url.includes("/api/stats/overview")) {
-        return new Response(JSON.stringify({ plays: 0, watchMs: 0, activeUsers: 0, activeItems: 0 }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({ plays: 0, watchMs: 0, activeUsers: 0, activeItems: 0 }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
       }
       if (url.includes("/api/stats/series") || url.includes("/api/stats/top-items")) {
         return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
@@ -89,7 +92,11 @@ describe("protected-route gate", () => {
 
   it("renders the protected route for an authenticated session", async () => {
     mockAuthMeAndOverviewQueries(
-      () => new Response(AUTHENTICATED_BODY, { status: 200, headers: { "content-type": "application/json" } }),
+      () =>
+        new Response(AUTHENTICATED_BODY, {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
     );
 
     const router = renderApp("/");
@@ -129,7 +136,11 @@ describe("protected-route gate", () => {
   // sidebar wrapped around the login card.
   it("redirects an already-authenticated visitor away from /login to the dashboard", async () => {
     mockAuthMeAndOverviewQueries(
-      () => new Response(AUTHENTICATED_BODY, { status: 200, headers: { "content-type": "application/json" } }),
+      () =>
+        new Response(AUTHENTICATED_BODY, {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
     );
 
     const router = renderApp("/login");
@@ -152,21 +163,33 @@ describe("protected-route gate", () => {
         const url = String(input instanceof Request ? input.url : input);
         if (url.includes("/api/auth/login")) {
           signedIn = true;
-          return new Response(AUTHENTICATED_BODY, { status: 200, headers: { "content-type": "application/json" } });
-        }
-        if (url.includes("/api/auth/me")) {
-          return signedIn
-            ? new Response(AUTHENTICATED_BODY, { status: 200, headers: { "content-type": "application/json" } })
-            : new Response("{}", { status: 401 });
-        }
-        if (url.includes("/api/stats/overview")) {
-          return new Response(JSON.stringify({ plays: 0, watchMs: 0, activeUsers: 0, activeItems: 0 }), {
+          return new Response(AUTHENTICATED_BODY, {
             status: 200,
             headers: { "content-type": "application/json" },
           });
         }
+        if (url.includes("/api/auth/me")) {
+          return signedIn
+            ? new Response(AUTHENTICATED_BODY, {
+                status: 200,
+                headers: { "content-type": "application/json" },
+              })
+            : new Response("{}", { status: 401 });
+        }
+        if (url.includes("/api/stats/overview")) {
+          return new Response(
+            JSON.stringify({ plays: 0, watchMs: 0, activeUsers: 0, activeItems: 0 }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
         if (url.includes("/api/stats/series") || url.includes("/api/stats/top-items")) {
-          return new Response("[]", { status: 200, headers: { "content-type": "application/json" } });
+          return new Response("[]", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
         }
         if (url.includes("/api/history")) {
           return new Response(JSON.stringify({ rows: [], total: 0 }), {

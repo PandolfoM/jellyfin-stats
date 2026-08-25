@@ -1,6 +1,5 @@
 export type Schedule =
-  | { type: "interval"; everyMs: number }
-  | { type: "daily"; hour: number; minute: number };
+  { type: "interval"; everyMs: number } | { type: "daily"; hour: number; minute: number };
 
 export const JOB_NAMES = [
   "session-poll",
@@ -35,7 +34,9 @@ export type JobName = (typeof JOB_NAMES)[number];
 function mostRecentDailyTarget(now: number, hour: number, minute: number): number {
   const d = new Date(now);
   const today = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, minute, 0, 0).getTime();
-  return today <= now ? today : new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1, hour, minute, 0, 0).getTime();
+  return today <= now
+    ? today
+    : new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1, hour, minute, 0, 0).getTime();
 }
 
 /**

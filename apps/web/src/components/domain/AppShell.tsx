@@ -72,7 +72,9 @@ export function AppShell({ userName, onLogout, children }: AppShellProps) {
                 to={item.to}
                 className={navLinkClassName}
                 activeOptions={{ exact: item.to === "/" }}
-                activeProps={{ className: cn(navLinkClassName, "bg-secondary text-secondary-foreground") }}
+                activeProps={{
+                  className: cn(navLinkClassName, "bg-secondary text-secondary-foreground"),
+                }}
               >
                 <Icon aria-hidden="true" className="size-4" />
                 {item.label}

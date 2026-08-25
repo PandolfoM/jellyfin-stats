@@ -331,7 +331,8 @@ export function startScheduler(
   // scheduler.test.ts's "tick timing" tests, which reproduce the skip directly.
   const tickMs = options.tickMs ?? Math.min(1000, context.env.SESSION_POLL_INTERVAL_MS);
   const readRuns = options.readRuns ?? (() => readJobRuns(context.db));
-  const writeRun = options.writeRun ?? ((name: JobName, at: Date) => writeJobRun(context.db, name, at));
+  const writeRun =
+    options.writeRun ?? ((name: JobName, at: Date) => writeJobRun(context.db, name, at));
 
   const deps: SchedulerDeps = {
     schedules: buildSchedules(context.env),

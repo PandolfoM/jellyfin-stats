@@ -13,7 +13,10 @@ export interface HistoryDeps {
  * threading in an already-chained app keeps those routes in the returned
  * type instead of them being erased at this call.
  */
-export function registerHistoryRoutes<E extends Env, S extends Schema>(app: Hono<E, S>, deps: HistoryDeps) {
+export function registerHistoryRoutes<E extends Env, S extends Schema>(
+  app: Hono<E, S>,
+  deps: HistoryDeps,
+) {
   return app.get("/api/history", async (c) => {
     const hasRange = c.req.query("from") !== undefined || c.req.query("to") !== undefined;
 

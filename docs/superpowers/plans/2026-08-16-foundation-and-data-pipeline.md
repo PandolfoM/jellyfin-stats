@@ -43,11 +43,13 @@ This plan is Plan 1 of 3. Plan 2 adds the HTTP API and authentication; Plan 3 ad
 Sets up the workspace so every later task has a working test command. Nothing here is app logic; the deliverable is "the toolchain runs and typechecks".
 
 **Files:**
+
 - Create: `package.json`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `vitest.config.ts`, `.env.example`, `.npmrc`
 - Create: `packages/shared/package.json`, `packages/shared/tsconfig.json`, `packages/shared/src/index.ts`
 - Test: `packages/shared/src/index.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing (first task).
 - Produces: the `@jfstats/shared` package name and the root scripts `pnpm test`, `pnpm typecheck`, `pnpm build`. All later packages are named `@jfstats/<dir>` and are referenced as `"@jfstats/shared": "workspace:*"`.
 
@@ -241,11 +243,13 @@ git commit -m "Set up pnpm workspace with TypeScript and Vitest"
 Config is parsed once, validated with Zod, and fails loudly at boot rather than producing `undefined` deep inside a job.
 
 **Files:**
+
 - Create: `packages/shared/src/env.ts`
 - Modify: `packages/shared/src/index.ts`
 - Test: `packages/shared/src/env.test.ts`
 
 **Interfaces:**
+
 - Consumes: `@jfstats/shared` package from Task 1.
 - Produces: `loadEnv(source?: NodeJS.ProcessEnv): AppEnv` and the `AppEnv` type. Every later task reads config through `loadEnv()`, never `process.env` directly.
 
@@ -294,7 +298,9 @@ describe("loadEnv", () => {
   });
 
   it("rejects a completion threshold above 1", () => {
-    expect(() => loadEnv({ ...valid, COMPLETION_THRESHOLD: "1.5" })).toThrow(/COMPLETION_THRESHOLD/);
+    expect(() => loadEnv({ ...valid, COMPLETION_THRESHOLD: "1.5" })).toThrow(
+      /COMPLETION_THRESHOLD/,
+    );
   });
 
   it("enables the fallback admin only when both credentials are set", () => {
@@ -410,10 +416,12 @@ clamp and reconciliation window cannot drift apart from it."
 The vocabulary the reducer and the applier share. Types only — no runtime logic — so this task has no behavioral test; it is verified by `pnpm typecheck` and consumed immediately in Task 4.
 
 **Files:**
+
 - Create: `packages/shared/src/session.ts`
 - Modify: `packages/shared/src/index.ts`
 
 **Interfaces:**
+
 - Consumes: `@jfstats/shared` from Task 2.
 - Produces: `PlayMethod`, `LiveSession`, `SessionSnapshot`, `SessionSnapshotEntry`, `SessionEvent`. Task 4's `diffSessions` consumes and produces exactly these; Task 8's applier switches on `SessionEvent["type"]`.
 
@@ -504,10 +512,12 @@ git commit -m "Add session domain types shared by the reducer and applier"
 Read the whole task before writing code; the tests define behavior that is easy to get subtly wrong.
 
 **Files:**
+
 - Create: `apps/server/package.json`, `apps/server/tsconfig.json`, `apps/server/src/sync/diff.ts`
 - Test: `apps/server/src/sync/diff.test.ts`
 
 **Interfaces:**
+
 - Consumes: `LiveSession`, `SessionSnapshot`, `SessionEvent` from Task 3.
 - Produces:
   - `snapshotKey(playSessionId: string, itemId: string): string`
@@ -520,7 +530,7 @@ Read the whole task before writing code; the tests define behavior that is easy 
 **Design notes the implementer must honor:**
 
 1. **Sessions are keyed by `playSessionId` AND `itemId`.** Jellyfin reuses a `PlaySessionId` when a client auto-plays the next episode. Treating that as one continuous session would merge two episodes into one row. Keying on both means an item change naturally emits `ended` for the old item and `started` for the new one.
-2. **Watch time is wall-clock, not position-derived.** `watchedMs` is the time elapsed since the previous observation, credited only when the stream was *not* paused at that previous observation. This is why seeking backward or forward cannot corrupt stats.
+2. **Watch time is wall-clock, not position-derived.** `watchedMs` is the time elapsed since the previous observation, credited only when the stream was _not_ paused at that previous observation. This is why seeking backward or forward cannot corrupt stats.
 3. **Every delta is clamped to `maxWatchDeltaMs`** and floored at 0. A stalled worker or a backwards clock jump contributes nothing rather than a spurious hour.
 4. **A vanished session is credited its final delta** (clamped) if it was playing when last seen. This over-credits by at most one poll interval, which is the correct trade against systematically under-counting the end of every stream.
 
@@ -713,7 +723,15 @@ describe("diffSessions", () => {
     const first = diffSessions({}, [live], OPTIONS);
     const second = diffSessions(first.snapshot, [live], OPTIONS);
 
-    expect(second.events).toEqual([{ type: "progressed", key: snapshotKey("ps-1", "item-1"), positionTicks: live.positionTicks, watchedMs: 0, at: OPTIONS.now }]);
+    expect(second.events).toEqual([
+      {
+        type: "progressed",
+        key: snapshotKey("ps-1", "item-1"),
+        positionTicks: live.positionTicks,
+        watchedMs: 0,
+        at: OPTIONS.now,
+      },
+    ]);
     expect(second.snapshot).toEqual(first.snapshot);
   });
 
@@ -750,7 +768,12 @@ Expected: FAIL — cannot resolve `./diff.js`.
 - [ ] **Step 4: Implement `diff.ts`**
 
 ```ts
-import type { LiveSession, SessionEvent, SessionSnapshot, SessionSnapshotEntry } from "@jfstats/shared";
+import type {
+  LiveSession,
+  SessionEvent,
+  SessionSnapshot,
+  SessionSnapshotEntry,
+} from "@jfstats/shared";
 
 export interface DiffOptions {
   /** Epoch milliseconds at which this poll was taken. Injected, never read from the clock. */
@@ -890,11 +913,13 @@ applier closes the old row before opening the new one."
 ### Task 5: Database schema and migrations
 
 **Files:**
+
 - Create: `packages/db/package.json`, `packages/db/tsconfig.json`, `packages/db/drizzle.config.ts`, `packages/db/src/schema.ts`, `packages/db/src/client.ts`, `packages/db/src/index.ts`
 - Create: `docker-compose.yml`
 - Test: `packages/db/src/schema.test.ts`, `packages/db/src/testing/harness.ts`
 
 **Interfaces:**
+
 - Consumes: `@jfstats/shared` from Task 2.
 - Produces:
   - Tables `jellyfinUsers`, `libraries`, `items`, `devices`, `playbackSessions`, `playbackRollupDaily` exported from `@jfstats/db`.
@@ -1298,11 +1323,13 @@ test is the SQL itself."
 Upserts for users, libraries, items, and devices. These must be idempotent — they run every 15 minutes forever.
 
 **Files:**
+
 - Create: `packages/db/src/repositories/reference.ts`
 - Modify: `packages/db/src/index.ts`
 - Test: `packages/db/src/repositories/reference.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Db`, schema tables, `withTestDatabase` from Task 5.
 - Produces:
   - `upsertUsers(db: Db, rows: UserInput[]): Promise<void>`
@@ -1590,11 +1617,13 @@ would be far worse than skipping a cycle."
 The write path for playback, and the rollup arithmetic that makes dashboards fast.
 
 **Files:**
+
 - Create: `packages/db/src/repositories/playback.ts`
 - Modify: `packages/db/src/index.ts`
 - Test: `packages/db/src/repositories/playback.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Db`, schema, `withTestDatabase` from Task 5.
 - Produces:
   - `openSession(db, input: OpenSessionInput): Promise<void>`
@@ -1826,7 +1855,12 @@ describe("playback repositories", () => {
   it("finds only open sessions older than the cutoff", async () => {
     await withTestDatabase(async (db) => {
       await openSession(db, OPEN);
-      await openSession(db, { ...OPEN, playSessionId: "ps-2", itemId: "item-2", at: new Date(START.getTime() + 60_000) });
+      await openSession(db, {
+        ...OPEN,
+        playSessionId: "ps-2",
+        itemId: "item-2",
+        at: new Date(START.getTime() + 60_000),
+      });
 
       const stale = await findStaleOpenSessions(db, new Date(START.getTime() + 30_000));
 
@@ -1837,7 +1871,14 @@ describe("playback repositories", () => {
 
   it("adds to an existing rollup row rather than replacing it", async () => {
     await withTestDatabase(async (db) => {
-      const delta = { day: "2026-08-16", userId: "user-1", itemId: "item-1", libraryId: "lib-1", playCount: 1, watchMs: 5_000 };
+      const delta = {
+        day: "2026-08-16",
+        userId: "user-1",
+        itemId: "item-1",
+        libraryId: "lib-1",
+        playCount: 1,
+        watchMs: 5_000,
+      };
 
       await applyRollupDelta(db, delta);
       await applyRollupDelta(db, delta);
@@ -1852,18 +1893,47 @@ describe("playback repositories", () => {
     await withTestDatabase(async (db) => {
       // Two real sessions on the same day for the same user and item.
       await db.insert(playbackSessions).values([
-        { playSessionId: "ps-1", itemId: "item-1", userId: "user-1", startedAt: START, lastSeenAt: START, endedAt: new Date(START.getTime() + 60_000), watchMs: 6_000 },
-        { playSessionId: "ps-2", itemId: "item-1", userId: "user-1", startedAt: START, lastSeenAt: START, endedAt: new Date(START.getTime() + 120_000), watchMs: 4_000 },
+        {
+          playSessionId: "ps-1",
+          itemId: "item-1",
+          userId: "user-1",
+          startedAt: START,
+          lastSeenAt: START,
+          endedAt: new Date(START.getTime() + 60_000),
+          watchMs: 6_000,
+        },
+        {
+          playSessionId: "ps-2",
+          itemId: "item-1",
+          userId: "user-1",
+          startedAt: START,
+          lastSeenAt: START,
+          endedAt: new Date(START.getTime() + 120_000),
+          watchMs: 4_000,
+        },
       ]);
       // A drifted rollup row, as if an incremental write had been lost.
-      await applyRollupDelta(db, { day: "2026-08-16", userId: "user-1", itemId: "item-1", libraryId: null, playCount: 1, watchMs: 999 });
+      await applyRollupDelta(db, {
+        day: "2026-08-16",
+        userId: "user-1",
+        itemId: "item-1",
+        libraryId: null,
+        playCount: 1,
+        watchMs: 999,
+      });
 
-      await recomputeRollupRange(db, new Date("2026-08-16T00:00:00Z"), new Date("2026-08-17T00:00:00Z"));
+      await recomputeRollupRange(
+        db,
+        new Date("2026-08-16T00:00:00Z"),
+        new Date("2026-08-17T00:00:00Z"),
+      );
 
       const rows = await db
         .select()
         .from(playbackRollupDaily)
-        .where(and(eq(playbackRollupDaily.userId, "user-1"), eq(playbackRollupDaily.itemId, "item-1")));
+        .where(
+          and(eq(playbackRollupDaily.userId, "user-1"), eq(playbackRollupDaily.itemId, "item-1")),
+        );
 
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({ playCount: 2, watchMs: 10_000 });
@@ -1872,9 +1942,20 @@ describe("playback repositories", () => {
 
   it("removes rollup rows in range that no longer have sessions", async () => {
     await withTestDatabase(async (db) => {
-      await applyRollupDelta(db, { day: "2026-08-16", userId: "ghost", itemId: "item-x", libraryId: null, playCount: 3, watchMs: 300 });
+      await applyRollupDelta(db, {
+        day: "2026-08-16",
+        userId: "ghost",
+        itemId: "item-x",
+        libraryId: null,
+        playCount: 3,
+        watchMs: 300,
+      });
 
-      await recomputeRollupRange(db, new Date("2026-08-16T00:00:00Z"), new Date("2026-08-17T00:00:00Z"));
+      await recomputeRollupRange(
+        db,
+        new Date("2026-08-16T00:00:00Z"),
+        new Date("2026-08-17T00:00:00Z"),
+      );
 
       const rows = await db.select().from(playbackRollupDaily);
       expect(rows).toEqual([]);
@@ -2162,11 +2243,13 @@ incremental path produced."
 The only module that knows Jellyfin's HTTP shape. Every response is validated with Zod, so a Jellyfin upgrade that changes a field fails loudly here instead of writing nulls into the database.
 
 **Files:**
+
 - Create: `packages/jellyfin/package.json`, `packages/jellyfin/tsconfig.json`, `packages/jellyfin/src/client.ts`, `packages/jellyfin/src/schemas.ts`, `packages/jellyfin/src/index.ts`
 - Create: `packages/jellyfin/src/fixtures/sessions.json`, `packages/jellyfin/src/fixtures/users.json`
 - Test: `packages/jellyfin/src/client.test.ts`
 
 **Interfaces:**
+
 - Consumes: `LiveSession`, `PlayMethod` from Task 3.
 - Produces: `createJellyfinClient(options: JellyfinClientOptions): JellyfinClient` with methods `getSessions(): Promise<LiveSession[]>`, `getUsers(): Promise<JellyfinUser[]>`, `getLibraries(): Promise<JellyfinLibrary[]>`, `getItems(): Promise<JellyfinItem[]>`. Tasks 9 and 10 consume these. Plan 2 adds `authenticateByName` and `revokeToken` to this same client.
 
@@ -2262,8 +2345,16 @@ The second entry is playing but has no `NowPlayingItem` in the payload — it mu
 
 ```json
 [
-  { "Id": "11111111111111111111111111111111", "Name": "test-user-one", "Policy": { "IsAdministrator": true } },
-  { "Id": "55555555555555555555555555555555", "Name": "test-user-two", "Policy": { "IsAdministrator": false } }
+  {
+    "Id": "11111111111111111111111111111111",
+    "Name": "test-user-one",
+    "Policy": { "IsAdministrator": true }
+  },
+  {
+    "Id": "55555555555555555555555555555555",
+    "Name": "test-user-two",
+    "Policy": { "IsAdministrator": false }
+  }
 ]
 ```
 
@@ -2278,11 +2369,12 @@ import usersFixture from "./fixtures/users.json" with { type: "json" };
 import { createJellyfinClient } from "./client.js";
 
 function clientWith(payload: unknown, status = 200) {
-  const fetchMock = vi.fn(async () =>
-    new Response(JSON.stringify(payload), {
-      status,
-      headers: { "content-type": "application/json" },
-    }),
+  const fetchMock = vi.fn(
+    async () =>
+      new Response(JSON.stringify(payload), {
+        status,
+        headers: { "content-type": "application/json" },
+      }),
   );
 
   const client = createJellyfinClient({
@@ -2653,11 +2745,13 @@ Fixtures use fabricated identifiers and RFC 5737 documentation addresses."
 The impure shell around Task 4's reducer: takes events, writes them to Postgres, maintains the Redis snapshot, and publishes live updates.
 
 **Files:**
+
 - Create: `apps/server/src/sync/applier.ts`, `apps/server/src/sync/snapshot-store.ts`
 - Modify: `apps/server/package.json`
 - Test: `apps/server/src/sync/applier.test.ts`
 
 **Interfaces:**
+
 - Consumes: `diffSessions`, `snapshotKey` (Task 4); `openSession`, `touchSession`, `closeSession`, `applyRollupDelta`, `upsertDevice` (Tasks 6–7); `Db` (Task 5).
 - Produces:
   - `createSnapshotStore(redis: Redis): SnapshotStore` with `load(): Promise<SessionSnapshot>`, `save(snapshot: SessionSnapshot): Promise<void>`, `publish(sessions: LiveSession[]): Promise<void>`
@@ -2779,14 +2873,21 @@ describe("applyEvents", () => {
     const session = live();
     const key = snapshotKey("ps-1", "item-1");
 
-    await applyEvents(d, [{ type: "started", key, session, at: AT.getTime() }], new Map([[key, session]]));
+    await applyEvents(
+      d,
+      [{ type: "started", key, session, at: AT.getTime() }],
+      new Map([[key, session]]),
+    );
 
-    expect(d.openSession).toHaveBeenCalledWith(d.db, expect.objectContaining({
-      playSessionId: "ps-1",
-      itemId: "item-1",
-      userId: "user-1",
-      playMethod: "DirectPlay",
-    }));
+    expect(d.openSession).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({
+        playSessionId: "ps-1",
+        itemId: "item-1",
+        userId: "user-1",
+        playMethod: "DirectPlay",
+      }),
+    );
     expect(d.upsertDevice).toHaveBeenCalledWith(d.db, expect.objectContaining({ id: "device-1" }));
   });
 
@@ -2795,7 +2896,11 @@ describe("applyEvents", () => {
     const session = live();
     const key = snapshotKey("ps-1", "item-1");
 
-    await applyEvents(d, [{ type: "started", key, session, at: AT.getTime() }], new Map([[key, session]]));
+    await applyEvents(
+      d,
+      [{ type: "started", key, session, at: AT.getTime() }],
+      new Map([[key, session]]),
+    );
 
     expect(d.applyRollupDelta).not.toHaveBeenCalled();
   });
@@ -2811,14 +2916,20 @@ describe("applyEvents", () => {
       new Map([[key, session]]),
     );
 
-    expect(d.touchSession).toHaveBeenCalledWith(d.db, expect.objectContaining({ watchedMs: 5_000, isPaused: false }));
-    expect(d.applyRollupDelta).toHaveBeenCalledWith(d.db, expect.objectContaining({
-      day: "2026-08-16",
-      userId: "user-1",
-      itemId: "item-1",
-      playCount: 0,
-      watchMs: 5_000,
-    }));
+    expect(d.touchSession).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({ watchedMs: 5_000, isPaused: false }),
+    );
+    expect(d.applyRollupDelta).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({
+        day: "2026-08-16",
+        userId: "user-1",
+        itemId: "item-1",
+        playCount: 0,
+        watchMs: 5_000,
+      }),
+    );
   });
 
   it("skips the rollup write when no time was credited", async () => {
@@ -2847,11 +2958,17 @@ describe("applyEvents", () => {
       new Map([[key, session]]),
     );
 
-    expect(d.closeSession).toHaveBeenCalledWith(d.db, expect.objectContaining({
-      runtimeTicks: 100,
-      completionThreshold: 0.9,
-    }));
-    expect(d.applyRollupDelta).toHaveBeenCalledWith(d.db, expect.objectContaining({ playCount: 1, watchMs: 2_000 }));
+    expect(d.closeSession).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({
+        runtimeTicks: 100,
+        completionThreshold: 0.9,
+      }),
+    );
+    expect(d.applyRollupDelta).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({ playCount: 1, watchMs: 2_000 }),
+    );
   });
 
   it("counts the play even though the stream is already gone from the payload", async () => {
@@ -2860,25 +2977,39 @@ describe("applyEvents", () => {
 
     // The stream vanished, so it is absent from the incoming payload — the common case,
     // and the reason the rollup must be driven by the returned row rather than the payload.
-    await applyEvents(d, [{ type: "ended", key, positionTicks: 95, watchedMs: 2_000, at: AT.getTime() }], new Map());
+    await applyEvents(
+      d,
+      [{ type: "ended", key, positionTicks: 95, watchedMs: 2_000, at: AT.getTime() }],
+      new Map(),
+    );
 
-    expect(d.closeSession).toHaveBeenCalledWith(d.db, expect.objectContaining({
-      playSessionId: "ps-1",
-      itemId: "item-1",
-      runtimeTicks: null,
-    }));
-    expect(d.applyRollupDelta).toHaveBeenCalledWith(d.db, expect.objectContaining({
-      userId: "user-1",
-      playCount: 1,
-      watchMs: 2_000,
-    }));
+    expect(d.closeSession).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({
+        playSessionId: "ps-1",
+        itemId: "item-1",
+        runtimeTicks: null,
+      }),
+    );
+    expect(d.applyRollupDelta).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({
+        userId: "user-1",
+        playCount: 1,
+        watchMs: 2_000,
+      }),
+    );
   });
 
   it("does not count the play again when the close finds no open row", async () => {
     const d = deps(null);
     const key = snapshotKey("ps-1", "item-1");
 
-    await applyEvents(d, [{ type: "ended", key, positionTicks: 95, watchedMs: 2_000, at: AT.getTime() }], new Map());
+    await applyEvents(
+      d,
+      [{ type: "ended", key, positionTicks: 95, watchedMs: 2_000, at: AT.getTime() }],
+      new Map(),
+    );
 
     expect(d.applyRollupDelta).not.toHaveBeenCalled();
   });
@@ -2894,7 +3025,10 @@ describe("applyEvents", () => {
       new Map([[key, session]]),
     );
 
-    expect(d.touchSession).toHaveBeenCalledWith(d.db, expect.objectContaining({ isPaused: true, watchedMs: 5_000 }));
+    expect(d.touchSession).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({ isPaused: true, watchedMs: 5_000 }),
+    );
   });
 
   it("attributes watch time to the session's start day, not the poll day", async () => {
@@ -2913,7 +3047,10 @@ describe("applyEvents", () => {
 
     // recomputeRollupRange groups by started_at::date, so the incremental path must
     // agree or the nightly job would silently move this stream to a different day.
-    expect(d.applyRollupDelta).toHaveBeenCalledWith(d.db, expect.objectContaining({ day: "2026-08-16" }));
+    expect(d.applyRollupDelta).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({ day: "2026-08-16" }),
+    );
   });
 });
 ```
@@ -3136,10 +3273,12 @@ rather than halting playback capture."
 Two jobs: repairing sessions left open by a crash, and refreshing users/libraries/items.
 
 **Files:**
+
 - Create: `apps/server/src/sync/reconcile.ts`, `apps/server/src/sync/reference-sync.ts`
 - Test: `apps/server/src/sync/reconcile.test.ts`
 
 **Interfaces:**
+
 - Consumes: `findStaleOpenSessions`, `closeSession` (Task 7); `upsertUsers`, `upsertLibraries`, `upsertItems`, `archiveMissingItems` (Task 6); `JellyfinClient` (Task 8).
 - Produces:
   - `reconcileOpenSessions(deps: ReconcileDeps): Promise<number>` — returns how many were closed.
@@ -3178,14 +3317,17 @@ describe("reconcileOpenSessions", () => {
     const closed = await reconcileOpenSessions(d);
 
     expect(closed).toBe(1);
-    expect(d.closeSession).toHaveBeenCalledWith(d.db, expect.objectContaining({
-      playSessionId: "ps-1",
-      itemId: "item-1",
-      // Ending at lastSeenAt, not now, keeps the record honest — we have no evidence
-      // playback continued past the last observation.
-      at: lastSeenAt,
-      watchedMs: 0,
-    }));
+    expect(d.closeSession).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({
+        playSessionId: "ps-1",
+        itemId: "item-1",
+        // Ending at lastSeenAt, not now, keeps the record honest — we have no evidence
+        // playback continued past the last observation.
+        at: lastSeenAt,
+        watchedMs: 0,
+      }),
+    );
   });
 
   it("queries using the stale cutoff derived from the poll interval", async () => {
@@ -3204,7 +3346,13 @@ describe("reconcileOpenSessions", () => {
 
   it("credits no extra watch time when closing a stale session", async () => {
     const d = deps([
-      { playSessionId: "ps-1", itemId: "item-1", userId: "user-1", positionTicks: 42, lastSeenAt: new Date(NOW - 3_600_000) },
+      {
+        playSessionId: "ps-1",
+        itemId: "item-1",
+        userId: "user-1",
+        positionTicks: 42,
+        lastSeenAt: new Date(NOW - 3_600_000),
+      },
     ]);
 
     await reconcileOpenSessions(d);
@@ -3351,11 +3499,13 @@ the expensive item sync to the nightly run."
 Wires everything into a running process with BullMQ, ensuring only one poller runs even if the worker is scaled.
 
 **Files:**
+
 - Create: `apps/server/src/worker.ts`, `apps/server/src/logger.ts`, `apps/server/src/context.ts`
 - Modify: `apps/server/package.json`
 - Test: `apps/server/src/context.test.ts`
 
 **Interfaces:**
+
 - Consumes: everything from Tasks 4–10.
 - Produces: `createContext(env: AppEnv): AppContext` holding `{ env, db, pool, redis, jellyfin, snapshots, logger }`, and a runnable worker via `pnpm --filter @jfstats/server dev:worker`. Plan 2's API entrypoint reuses `createContext`.
 
@@ -3600,16 +3750,12 @@ async function main(): Promise<void> {
   await queue.upsertJobScheduler("item-sync", { pattern: "0 3 * * *" });
   await queue.upsertJobScheduler("rollup-recompute", { pattern: "30 3 * * *" });
 
-  const worker = new Worker(
-    QUEUE_NAME,
-    async (job) => handle(context, job.name as JobName),
-    {
-      connection: context.redis,
-      // One poll at a time. Concurrent polls would diff against the same snapshot
-      // and double-count the interval.
-      concurrency: 1,
-    },
-  );
+  const worker = new Worker(QUEUE_NAME, async (job) => handle(context, job.name as JobName), {
+    connection: context.redis,
+    // One poll at a time. Concurrent polls would diff against the same snapshot
+    // and double-count the interval.
+    concurrency: 1,
+  });
 
   worker.on("failed", (job, error) => {
     logger.error({ job: job?.name, err: error }, "sync job failed");
@@ -3671,11 +3817,13 @@ Logs redact the Jellyfin api key and session secret."
 Generates plausible fake history so the dashboard in Plan 3 is demoable and testable without touching a live server.
 
 **Files:**
+
 - Create: `apps/server/src/seed.ts`
 - Modify: `apps/server/package.json`
 - Test: `apps/server/src/seed.test.ts`
 
 **Interfaces:**
+
 - Consumes: repositories from Tasks 6–7.
 - Produces: `generateSeedData(options: SeedOptions): SeedData` (pure), and `pnpm --filter @jfstats/server seed`.
 
@@ -3742,7 +3890,14 @@ Expected: FAIL — cannot resolve `./seed.js`.
 - [ ] **Step 3: Implement `seed.ts`**
 
 ```ts
-import { createDb, playbackSessions, recomputeRollupRange, upsertItems, upsertLibraries, upsertUsers } from "@jfstats/db";
+import {
+  createDb,
+  playbackSessions,
+  recomputeRollupRange,
+  upsertItems,
+  upsertLibraries,
+  upsertUsers,
+} from "@jfstats/db";
 import { loadEnv } from "@jfstats/shared";
 
 export interface SeedOptions {
@@ -3931,10 +4086,12 @@ seeded data exercises the real aggregation path rather than a parallel one."
 Proves the whole pipeline agrees with itself. This is the task that would catch a rollup that silently diverges from its sessions.
 
 **Files:**
+
 - Test: `apps/server/src/sync/pipeline.test.ts`
 - Create: `README.md`
 
 **Interfaces:**
+
 - Consumes: everything.
 - Produces: nothing new — this is the gate on Plan 1.
 
@@ -3997,7 +4154,13 @@ describe("sync pipeline", () => {
   it("records a full stream and agrees with the nightly recompute", async () => {
     await withTestDatabase(async (db) => {
       await upsertItems(db, [
-        { id: "item-1", type: "Movie", name: "Demo Movie", libraryId: "lib-1", runtimeTicks: 60_000 * 10_000 },
+        {
+          id: "item-1",
+          type: "Movie",
+          name: "Demo Movie",
+          libraryId: "lib-1",
+          runtimeTicks: 60_000 * 10_000,
+        },
       ]);
 
       const snapshots = memorySnapshotStore();
@@ -4058,7 +4221,9 @@ describe("sync pipeline", () => {
 
   it("does not double count when the same poll is replayed", async () => {
     await withTestDatabase(async (db) => {
-      await upsertItems(db, [{ id: "item-1", type: "Movie", name: "Demo Movie", libraryId: "lib-1" }]);
+      await upsertItems(db, [
+        { id: "item-1", type: "Movie", name: "Demo Movie", libraryId: "lib-1" },
+      ]);
 
       const snapshots = memorySnapshotStore();
       const current = [liveSession()];
@@ -4088,7 +4253,9 @@ describe("sync pipeline", () => {
 
   it("agrees with the recompute for a stream that crosses midnight", async () => {
     await withTestDatabase(async (db) => {
-      await upsertItems(db, [{ id: "item-1", type: "Movie", name: "Demo Movie", libraryId: "lib-1" }]);
+      await upsertItems(db, [
+        { id: "item-1", type: "Movie", name: "Demo Movie", libraryId: "lib-1" },
+      ]);
 
       const beforeMidnight = new Date("2026-08-16T23:55:00Z").getTime();
       const snapshots = memorySnapshotStore();
@@ -4127,7 +4294,11 @@ describe("sync pipeline", () => {
 
       const incrementalWatchMs = incremental[0]?.watchMs ?? 0;
 
-      await recomputeRollupRange(db, new Date("2026-08-15T00:00:00Z"), new Date("2026-08-18T00:00:00Z"));
+      await recomputeRollupRange(
+        db,
+        new Date("2026-08-15T00:00:00Z"),
+        new Date("2026-08-18T00:00:00Z"),
+      );
 
       const recomputed = await db.select().from(playbackRollupDaily);
       expect(recomputed).toHaveLength(1);
@@ -4144,7 +4315,11 @@ describe("sync pipeline", () => {
 
       await upsertItems(db, data.items);
       await db.insert(playbackSessions).values(data.sessions);
-      await recomputeRollupRange(db, new Date(Date.now() - 31 * 86_400_000), new Date(Date.now() + 86_400_000));
+      await recomputeRollupRange(
+        db,
+        new Date(Date.now() - 31 * 86_400_000),
+        new Date(Date.now() + 86_400_000),
+      );
 
       const totals = await db.execute<{ sessions: string; rollup: string }>(sql`
         SELECT
@@ -4237,17 +4412,17 @@ pnpm --filter @jfstats/server seed
 
 ## Configuration
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `JELLYFIN_URL` | — | Base URL of your Jellyfin server (required) |
-| `JELLYFIN_API_KEY` | — | Jellyfin API key used for syncing (required) |
-| `DATABASE_URL` | — | Postgres connection string (required) |
-| `REDIS_URL` | — | Redis connection string (required) |
-| `SESSION_SECRET` | — | 32+ characters, used in Plan 2 (required) |
-| `SESSION_POLL_INTERVAL_MS` | `5000` | How often active sessions are polled |
-| `REFERENCE_SYNC_INTERVAL_MS` | `900000` | How often users and libraries refresh |
-| `COMPLETION_THRESHOLD` | `0.9` | Fraction of runtime that counts as watched |
-| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
+| Variable                     | Default  | Purpose                                      |
+| ---------------------------- | -------- | -------------------------------------------- |
+| `JELLYFIN_URL`               | —        | Base URL of your Jellyfin server (required)  |
+| `JELLYFIN_API_KEY`           | —        | Jellyfin API key used for syncing (required) |
+| `DATABASE_URL`               | —        | Postgres connection string (required)        |
+| `REDIS_URL`                  | —        | Redis connection string (required)           |
+| `SESSION_SECRET`             | —        | 32+ characters, used in Plan 2 (required)    |
+| `SESSION_POLL_INTERVAL_MS`   | `5000`   | How often active sessions are polled         |
+| `REFERENCE_SYNC_INTERVAL_MS` | `900000` | How often users and libraries refresh        |
+| `COMPLETION_THRESHOLD`       | `0.9`    | Fraction of runtime that counts as watched   |
+| `LOG_LEVEL`                  | `info`   | `debug`, `info`, `warn`, or `error`          |
 
 ## Development
 

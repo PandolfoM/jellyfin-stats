@@ -145,7 +145,9 @@ describe("getHistory", () => {
       await seed(db); // lib-1: 5 sessions
 
       await db.insert(libraries).values([{ id: "lib-2", name: "TV", collectionType: "tvshows" }]);
-      await db.insert(items).values([{ id: "item-3", name: "A Show", type: "Series", libraryId: "lib-2" }]);
+      await db
+        .insert(items)
+        .values([{ id: "item-3", name: "A Show", type: "Series", libraryId: "lib-2" }]);
       await db.insert(playbackSessions).values({
         sessionId: "sess-other-lib",
         userId: "user-a",
@@ -172,9 +174,15 @@ describe("getHistory", () => {
   it("returns a zero total for a library with no sessions", async () => {
     await withTestDatabase(async (db) => {
       await seed(db);
-      await db.insert(libraries).values([{ id: "lib-empty", name: "Empty", collectionType: "movies" }]);
+      await db
+        .insert(libraries)
+        .values([{ id: "lib-empty", name: "Empty", collectionType: "movies" }]);
 
-      const { total, rows } = await getHistory(db, { limit: 50, offset: 0, libraryId: "lib-empty" });
+      const { total, rows } = await getHistory(db, {
+        limit: 50,
+        offset: 0,
+        libraryId: "lib-empty",
+      });
 
       expect(total).toBe(0);
       expect(rows).toEqual([]);
@@ -185,8 +193,18 @@ describe("getHistory", () => {
     await withTestDatabase(async (db) => {
       await seed(db);
 
-      const inRange = await getHistory(db, { limit: 50, offset: 0, from: "2026-08-16", to: "2026-08-16" });
-      const outOfRange = await getHistory(db, { limit: 50, offset: 0, from: "2026-08-17", to: "2026-08-18" });
+      const inRange = await getHistory(db, {
+        limit: 50,
+        offset: 0,
+        from: "2026-08-16",
+        to: "2026-08-16",
+      });
+      const outOfRange = await getHistory(db, {
+        limit: 50,
+        offset: 0,
+        from: "2026-08-17",
+        to: "2026-08-18",
+      });
 
       expect(inRange.total).toBe(5);
       expect(outOfRange.total).toBe(0);

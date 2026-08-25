@@ -9,7 +9,8 @@ const MISSING_ITEM_ID = "ffffffffffffffffffffffffffffffff".slice(0, 32);
 function build(overrides: Partial<ImageDeps> = {}) {
   const deps: ImageDeps = {
     fetchImage: vi.fn(
-      async () => new Response("binary", { status: 200, headers: { "content-type": "image/jpeg" } }),
+      async () =>
+        new Response("binary", { status: 200, headers: { "content-type": "image/jpeg" } }),
     ),
     ...overrides,
   };

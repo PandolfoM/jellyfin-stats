@@ -21,7 +21,7 @@ still open except where Plan 2 closed an item in passing.
    live in `packages/jellyfin/src/client.ts` and bypassing its injectable `fetch` seam. The
    code is correct and well defended — this is boundary erosion, not a bug — but it should be
    restored before Plan 3 adds more Jellyfin-shaped calls. A `getItemImage(itemId, { tag,
-   maxWidth })` method on `JellyfinClient` closes it.
+maxWidth })` method on `JellyfinClient` closes it.
 
 3. **`LiveDeps.subscribe` depends on an unenforced contract.** `live.ts` calls its cleanup
    without a local `.catch()`, which is safe only because the single production `subscribe`
