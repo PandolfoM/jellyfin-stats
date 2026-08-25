@@ -70,6 +70,15 @@ function RootComponent() {
     return <SessionErrorState />;
   }
 
+  // The gate runs in both directions: /login is the anonymous-only route,
+  // the mirror of every other path being authenticated-only. Without this,
+  // `authenticated` renders `AppShell > Outlet` for /login too — so the
+  // moment a submitted login resolves, while the URL is still /login, the
+  // login card appears wrapped in the sidebar instead of the dashboard.
+  if (isLoginPath) {
+    return <Navigate to="/" replace />;
+  }
+
   return (
     <AppShell userName={session.user.userName} onLogout={() => void session.logout()}>
       <Outlet />

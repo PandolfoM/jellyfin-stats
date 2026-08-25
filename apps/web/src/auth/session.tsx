@@ -110,15 +110,16 @@ async function resolveSession(): Promise<SessionState> {
  * a generic "login failed".
  *
  * Checks `response.ok` directly instead of going through `unwrap` — this is
- * deliberate, not an oversight: a wrong password here must never call
- * `notifyUnauthorized`. `login.tsx` holds the resulting `LoginErrorCode` in
- * its own component-local state, and the login form is reachable while
- * already authenticated (a signed-in visitor can navigate to /login). If a
- * mistyped password here flipped the session to "anonymous" the same way a
- * stats/history 401 does, `routes/__root.tsx`'s gate would swap
- * `AppShell > Outlet` for a bare `Outlet` mid-request, remounting `login.tsx`
- * from scratch and discarding the very error message this request exists to
- * show the user.
+ * deliberate, not an oversight, for two reasons. First, `unwrap` collapses
+ * every non-2xx into one `ApiError`, but this endpoint's whole contract is
+ * that 401/403/429/503 each mean something different and carry a different
+ * remedy; `mapLoginStatus` needs the raw status to say which. Second, a
+ * wrong password here must never call `notifyUnauthorized`. That broadcast
+ * means "the session you had has expired or was revoked" and flips the whole
+ * app to "anonymous" — a failed *attempt* to establish a session is not that,
+ * and routing it through the same channel would report a typo as a session
+ * expiry. `login.tsx` holds the resulting `LoginErrorCode` in its own
+ * component-local state and renders the specific message.
  */
 async function performLogin(
   username: string,
