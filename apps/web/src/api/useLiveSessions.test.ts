@@ -178,7 +178,10 @@ describe("useLiveSessions", () => {
       installFakeEventSource();
       const notifySpy = vi.spyOn(unauthorized, "notifyUnauthorized");
       const fetchMock = mockAuthMe(
-        () => new Response(JSON.stringify({ userId: "u", userName: "admin", isAdmin: true }), { status: 200 }),
+        () =>
+          new Response(JSON.stringify({ userId: "u", userName: "admin", isAdmin: true }), {
+            status: 200,
+          }),
       );
 
       renderHook(() => useLiveSessions());

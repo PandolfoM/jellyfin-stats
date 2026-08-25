@@ -1,4 +1,9 @@
-import type { LiveSession, SessionEvent, SessionSnapshot, SessionSnapshotEntry } from "@jfstats/shared";
+import type {
+  LiveSession,
+  SessionEvent,
+  SessionSnapshot,
+  SessionSnapshotEntry,
+} from "@jfstats/shared";
 
 export interface DiffOptions {
   /** Epoch milliseconds at which this poll was taken. Injected, never read from the clock. */

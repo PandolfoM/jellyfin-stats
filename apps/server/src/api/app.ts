@@ -190,7 +190,9 @@ export function createApp(context: AppContext) {
     jellyfinUrl: context.env.JELLYFIN_URL,
   });
 
-  const imagesApp = registerImageRoutes(settingsApp, { fetchImage: createImageFetcher(context.env) });
+  const imagesApp = registerImageRoutes(settingsApp, {
+    fetchImage: createImageFetcher(context.env),
+  });
 
   // registerLiveRoute returns one object carrying both the chained app (used
   // just below) and the LiveStreamRegistry members themselves — see that

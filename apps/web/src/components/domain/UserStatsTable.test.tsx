@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import { render, screen, within } from "@testing-library/react";
-import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { UserStatsResponse } from "../../api/queries";

@@ -36,7 +36,10 @@ export interface SettingsDeps {
  * site is where the real allow-list boundary lives, picking exactly these
  * four fields off `context.env` by name.
  */
-export function registerSettingsRoutes<E extends Env, S extends Schema>(app: Hono<E, S>, deps: SettingsDeps) {
+export function registerSettingsRoutes<E extends Env, S extends Schema>(
+  app: Hono<E, S>,
+  deps: SettingsDeps,
+) {
   return app.get("/api/settings", (c) =>
     c.json({
       sessionPollIntervalMs: deps.sessionPollIntervalMs,

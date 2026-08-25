@@ -116,7 +116,7 @@ verified when it was written:
   UTC-4. On a UTC CI runner it would have passed against the broken implementation.
 - A compile-time guard covered one of seven response types while its comment advertised all seven.
 - A query key's filters could be dropped with all nineteen tests still green.
-- Three path-traversal assertions checked a string absent from a body that was *always*
+- Three path-traversal assertions checked a string absent from a body that was _always_
   `index.html`, so they held whether or not any protection existed.
 - A credential-leak fix was verified with fake credentials that fail on a local 401 in
   milliseconds — never exercising the multi-second window it was written to close.
@@ -136,7 +136,7 @@ that does not exist under pnpm's isolated linker, and `env_file: .env` leaving c
 `localhost`. Vitest's transform-only checking never caught the first; only `tsc --build` did.
 
 **For the next plan:** verify against the real thing before code depends on its shape, and verify
-against the *composed* thing rather than a component in isolation — the traversal probe that misled
+against the _composed_ thing rather than a component in isolation — the traversal probe that misled
 this plan tested `serveStatic` alone, not the two-handler wiring it actually runs in. When a comment
 documents a mechanism's coverage, treat it as load-bearing: a comment claiming 401 handling covered
 SSE and images, when it structurally could not, was one task away from producing a real defect in

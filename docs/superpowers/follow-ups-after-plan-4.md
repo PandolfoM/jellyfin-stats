@@ -18,7 +18,7 @@ an authenticated admin's browser) is unchanged and still open.
    `redact.paths` (`apiKey`, `JELLYFIN_API_KEY`, `*.apiKey`, `headers.authorization`,
    `headers.Authorization`) matches object paths — fast-redact walks the logged object's shape
    and blanks out fields at those exact paths. It cannot reach into a string value and redact a
-   substring, so a connection string that ends up *inside* `Error.message` or `Error.stack`
+   substring, so a connection string that ends up _inside_ `Error.message` or `Error.stack`
    prints verbatim. Verified directly: logging a synthetic
    `new Error("connection failed: postgres://user:secretpass@host:5432/db")` through
    `createLogger` prints the password in clear text in both `err.message` and `err.stack`.
@@ -27,7 +27,7 @@ an authenticated admin's browser) is unchanged and still open.
    above `catch (error)` in `main()`) — and a `pg` connection failure is exactly the kind of
    error whose message can echo the connection string back. Practical risk is low: `pg`'s own
    connection errors normally read as `"connection refused"` or `"password authentication failed
-   for user \"jfstats\""`, not as the URI itself, so `DATABASE_URL`'s password reaching a log
+for user \"jfstats\""`, not as the URI itself, so `DATABASE_URL`'s password reaching a log
    line would need `pg` (or a future caller) to construct an error that embeds the URL, which
    isn't what's observed today. Still a real gap: `redact.censor` has no text-scanning
    counterpart in `pino`/`fast-redact`, so closing it needs either a `serializers.err` that
@@ -38,14 +38,14 @@ an authenticated admin's browser) is unchanged and still open.
 2. **The vitest `projects` split was attempted and failed twice; recovering the lost wall clock
    is still open.** `vitest.config.ts` runs the whole suite at `fileParallelism: false` because
    the ~10 files that start a real Postgres container (via
-   `packages/db/src/testing/harness.ts`, which caches one container per worker *process*) starve
+   `packages/db/src/testing/harness.ts`, which caches one container per worker _process_) starve
    Docker/Ryuk when vitest's default one-worker-per-CPU parallelism starts several at once —
    reproduced directly as nondeterministic `Test timed out in 15000ms` failures on container
    startup, never a real assertion failure. A `vitest.workspace.ts` split (a "db" project
    serialized, an "unit" project at full parallelism for the ~400 pure tests) was tried first and
    failed for two concrete, non-theoretical reasons: `extends` concatenates array fields like
    `test.include` rather than replacing them, so the first attempt's "db" project silently ran
-   the *entire* suite; and after fixing that with an explicit, non-extending `test` block per
+   the _entire_ suite; and after fixing that with an explicit, non-extending `test` block per
    project, the "unit" project's full-CPU parallelism still starved the "db" project's single
    worker of scheduling time while its containers tried to start, reproduced with a real
    `pnpm test` run producing 4 container-start timeouts. The blanket `fileParallelism: false`
@@ -80,7 +80,7 @@ an authenticated admin's browser) is unchanged and still open.
    success-path logging, and `runDueJobs` (`apps/server/src/scheduler.ts`) only logs on
    `.catch()` — a job that dispatches and finishes without error writes nothing to the log
    stream at all. Verified directly against the running two-service stack: `docker compose logs
-   app` sat at exactly three lines (`migrations applied`, `startup reconciliation complete`,
+app` sat at exactly three lines (`migrations applied`, `startup reconciliation complete`,
    `listening`) for the full observation window while `job_runs.last_run_at` for `session-poll`
    advanced every ~5 seconds underneath it. Task 10 chose to document the operator workaround
    (query `job_runs` directly, or watch the Live screen) in the README's new "Confirming the
@@ -97,7 +97,7 @@ an authenticated admin's browser) is unchanged and still open.
    triage.** BullMQ retained a queryable history of failed jobs — error, timestamp, retry count —
    independent of the log stream. The Postgres-backed replacement keeps none of that: a failed
    job logs once, at `error` level, via `deps.logger.error({ err, job: name }, "scheduled job
-   failed")` in `runDueJobs`, and `job_runs` is *not* updated on failure (deliberately — so the
+failed")` in `runDueJobs`, and `job_runs` is _not_ updated on failure (deliberately — so the
    next tick retries), meaning there is no durable record that a failure happened at all once the
    log line scrolls past or the container's log retention rotates it out. In practice this
    matters most for `reference-sync` and `item-sync`, which fail silently to the dashboard (stale
@@ -115,7 +115,7 @@ an authenticated admin's browser) is unchanged and still open.
    interval. **That is fixed**: the default is now `Math.min(1000, SESSION_POLL_INTERVAL_MS)`, so a
    slipped tick costs at most a second rather than a full interval. What remains is only the
    ergonomic half — an operator who raises `SESSION_POLL_INTERVAL_MS` to reduce Jellyfin load still
-   has no separate knob for how often the scheduler *checks* whether anything is due. A dedicated
+   has no separate knob for how often the scheduler _checks_ whether anything is due. A dedicated
    `SCHEDULER_TICK_MS` would separate them.
 
 ## Smaller cleanups
@@ -141,7 +141,7 @@ an authenticated admin's browser) is unchanged and still open.
    lock around that read-then-write. `main.ts` has always called it; the final fix wave added calls
    in `seed.ts` and `backfill.ts` so the README's documented first-run sequence actually works
    against a fresh database. Running two of `app` / `seed` / `backfill` concurrently against a
-   *truly* empty database could therefore hit a duplicate-relation error or a transaction conflict.
+   _truly_ empty database could therefore hit a duplicate-relation error or a transaction conflict.
    Outside the documented sequential flow, and the README already warns against running more than
    one `app` instance — but the surface is wider than it was, and a Postgres advisory lock around
    the migrate call would close it cheaply.

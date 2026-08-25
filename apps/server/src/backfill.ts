@@ -16,8 +16,7 @@ export interface BackfillRange {
   to: Date;
 }
 
-const USAGE =
-  "Usage: pnpm --filter @jfstats/server backfill --from <YYYY-MM-DD> --to <YYYY-MM-DD>";
+const USAGE = "Usage: pnpm --filter @jfstats/server backfill --from <YYYY-MM-DD> --to <YYYY-MM-DD>";
 
 /**
  * Reads `--from` / `--to` out of raw argv. Both forms are accepted (`--from X` and
@@ -69,7 +68,8 @@ export function parseBackfillArgs(argv: readonly string[]): BackfillRange | { er
   const from = parseUtcDay(rawFrom);
   const to = parseUtcDay(rawTo);
 
-  if (from === null) return { error: `Could not parse --from "${rawFrom}" as YYYY-MM-DD.\n${USAGE}` };
+  if (from === null)
+    return { error: `Could not parse --from "${rawFrom}" as YYYY-MM-DD.\n${USAGE}` };
   if (to === null) return { error: `Could not parse --to "${rawTo}" as YYYY-MM-DD.\n${USAGE}` };
 
   // --to is inclusive (runBackfill advances it by one UTC day before handing the range

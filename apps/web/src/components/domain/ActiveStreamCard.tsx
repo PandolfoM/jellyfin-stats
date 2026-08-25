@@ -51,12 +51,16 @@ export function ActiveStreamCard({ session, variant }: ActiveStreamCardProps) {
   const positionMs = ticksToMs(session.positionTicks);
   const runtimeMs = session.runtimeTicks !== null ? ticksToMs(session.runtimeTicks) : null;
   const percent =
-    runtimeMs !== null && runtimeMs > 0 ? Math.min(100, Math.max(0, (positionMs / runtimeMs) * 100)) : null;
+    runtimeMs !== null && runtimeMs > 0
+      ? Math.min(100, Math.max(0, (positionMs / runtimeMs) * 100))
+      : null;
 
   return (
     <Card data-testid="active-stream-card">
       <CardContent className={cn("flex gap-3", isCompact ? "items-center p-3" : "flex-col p-4")}>
-        <div className={cn("flex min-w-0 gap-3", isCompact ? "flex-1 items-center" : "items-start")}>
+        <div
+          className={cn("flex min-w-0 gap-3", isCompact ? "flex-1 items-center" : "items-start")}
+        >
           <PosterImage
             itemId={session.itemId}
             tag={null}

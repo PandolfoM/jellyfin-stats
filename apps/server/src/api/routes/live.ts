@@ -50,7 +50,10 @@ const HEARTBEAT_MS = 25_000;
  * caller threading in an already-chained app keeps those routes in the
  * returned type instead of them being erased at this call.
  */
-export function registerLiveRoute<E extends Env, S extends Schema>(app: Hono<E, S>, deps: LiveDeps) {
+export function registerLiveRoute<E extends Env, S extends Schema>(
+  app: Hono<E, S>,
+  deps: LiveDeps,
+) {
   const openStreams = new Set<() => Promise<void>>();
 
   const routedApp = app.get("/api/live", (c) => {
@@ -110,7 +113,10 @@ export function registerLiveRoute<E extends Env, S extends Schema>(app: Hono<E, 
       // Send what is playing right now. Without this the page is blank until the
       // worker's next poll, which looks like nothing is playing.
       try {
-        await stream.writeSSE({ event: "sessions", data: JSON.stringify(await deps.loadCurrent()) });
+        await stream.writeSSE({
+          event: "sessions",
+          data: JSON.stringify(await deps.loadCurrent()),
+        });
       } catch {
         await stream.writeSSE({ event: "sessions", data: "[]" });
       }

@@ -32,7 +32,9 @@ test.describe("anonymous access", () => {
     await expect(page).toHaveURL(/\/login$/);
   });
 
-  test("shows the invalid-credentials message for a wrong username and password", async ({ page }) => {
+  test("shows the invalid-credentials message for a wrong username and password", async ({
+    page,
+  }) => {
     await page.goto("/login");
 
     // Invented for this test, obviously fake, and never a real credential:

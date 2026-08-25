@@ -43,15 +43,15 @@ possible later without backfill.
 
 ## Stack
 
-| Layer | Choice | Rationale |
-|---|---|---|
-| Runtime | Node 22 LTS | Stable; BullMQ and Drizzle are well-exercised on it |
-| API | Hono | Very fast router; its RPC client gives the SPA end-to-end types with no codegen |
-| Jobs | BullMQ (Redis-backed) | Repeatable jobs, distributed locks, retries with backoff |
-| DB | PostgreSQL 17 + Drizzle ORM | SQL-first; migrations are readable files; query plans stay visible |
-| Cache/bus | Redis 7 | Live-session snapshots, pub/sub fan-out, sessions, rate limiting |
-| UI | Vite + React 19, TanStack Router + Query, Tailwind v4, shadcn/ui, Recharts | Fast dev loop; a clean component base without hand-rolling a design system |
-| Tests | Vitest, testcontainers, Playwright | Unit / integration / one smoke test |
+| Layer     | Choice                                                                     | Rationale                                                                       |
+| --------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Runtime   | Node 22 LTS                                                                | Stable; BullMQ and Drizzle are well-exercised on it                             |
+| API       | Hono                                                                       | Very fast router; its RPC client gives the SPA end-to-end types with no codegen |
+| Jobs      | BullMQ (Redis-backed)                                                      | Repeatable jobs, distributed locks, retries with backoff                        |
+| DB        | PostgreSQL 17 + Drizzle ORM                                                | SQL-first; migrations are readable files; query plans stay visible              |
+| Cache/bus | Redis 7                                                                    | Live-session snapshots, pub/sub fan-out, sessions, rate limiting                |
+| UI        | Vite + React 19, TanStack Router + Query, Tailwind v4, shadcn/ui, Recharts | Fast dev loop; a clean component base without hand-rolling a design system      |
+| Tests     | Vitest, testcontainers, Playwright                                         | Unit / integration / one smoke test                                             |
 
 Rejected alternatives: **Next.js** (the background poller doesn't fit a request-scoped
 runtime, so a separate worker process is needed anyway — the weight without the benefit);
@@ -158,12 +158,12 @@ integration test asserts that incremental and recomputed totals agree.
 All sync runs as BullMQ repeatable jobs, each holding a distributed lock so two workers
 never double-count.
 
-| Job | Default interval | Configurable |
-|---|---|---|
-| Session poll | 5s | yes |
-| User + library sync | 15m | yes |
-| Full item sync | nightly | yes |
-| Rollup recompute (trailing 7d) | nightly | no |
+| Job                            | Default interval | Configurable |
+| ------------------------------ | ---------------- | ------------ |
+| Session poll                   | 5s               | yes          |
+| User + library sync            | 15m              | yes          |
+| Full item sync                 | nightly          | yes          |
+| Rollup recompute (trailing 7d) | nightly          | no           |
 
 ### The diff reducer
 
@@ -182,7 +182,7 @@ server.
 1. **Watch time is accumulated, never derived.** Each poll adds the elapsed delta only while
    the stream is unpaused, **clamped to 1.5× the poll interval**. A worker stall or paused
    container cannot inflate a user's stats.
-2. **Idempotent writes.** `session_id` is unique-indexed *among open rows only*, so a replayed poll or
+2. **Idempotent writes.** `session_id` is unique-indexed _among open rows only_, so a replayed poll or
    double-delivered job updates the existing row rather than creating a phantom stream.
 3. **Startup reconciliation.** Postgres is the source of truth. On worker start, any session
    with `ended_at IS NULL` and `last_seen_at` older than 2× the poll interval is closed at
@@ -207,13 +207,13 @@ Treat this section as the authority over anything inferred from the docs.
 - **A session `Id` is stable across items** for the lifetime of a client connection. So
   `(session_id, item_id)` repeats when someone re-watches the same episode in one sitting.
   The identity index is therefore **partial** — `UNIQUE (session_id, item_id) WHERE ended_at
-  IS NULL` — so completed rows stop constraining, and a re-watch opens a new row instead of
+IS NULL` — so completed rows stop constraining, and a re-watch opens a new row instead of
   merging into the old one.
 - **An item's `ParentId` is not its library.** For an Episode it is the Season; for a Movie it
   is a collection folder. Neither matches the `ItemId` values from `/Library/VirtualFolders`.
   An item's library must come from **querying per library** (`ParentId=<libraryId>&Recursive=true`)
   and tagging results with the library that was queried.
-- `SeriesId` and `SeasonId` *are* returned on episodes by default and need no `Fields` request.
+- `SeriesId` and `SeasonId` _are_ returned on episodes by default and need no `Fields` request.
   `ParentId` does require `Fields=ParentId`; `ImageTags` requires `EnableImages=true`.
 - **Paused state must be read from the payload every poll**, not inferred from a state
   transition. A stream stays paused across many polls while only reporting the transition once.
@@ -257,15 +257,15 @@ unless both are explicitly set**, so an unconfigured deployment exposes no stati
 Clean and spacious: generous whitespace, restrained palette, two or three well-chosen charts
 per view. Dark mode from the start — this dashboard will live on a TV or second monitor.
 
-| Route | Content |
-|---|---|
-| `/login` | Jellyfin credentials, single card |
-| `/` | Overview — active streams, plays and watch time today/week, watch-time trend, recent activity |
-| `/live` | Active streams with progress bars and transcode badges, updating over SSE |
-| `/history` | Paginated table, filterable by user, library, and date range |
-| `/users`, `/users/:id` | Per-user watch time, top content, device breakdown |
-| `/libraries`, `/libraries/:id` | Per-library totals, most-watched items |
-| `/settings` | Sync intervals, completion threshold, manual re-sync trigger |
+| Route                          | Content                                                                                       |
+| ------------------------------ | --------------------------------------------------------------------------------------------- |
+| `/login`                       | Jellyfin credentials, single card                                                             |
+| `/`                            | Overview — active streams, plays and watch time today/week, watch-time trend, recent activity |
+| `/live`                        | Active streams with progress bars and transcode badges, updating over SSE                     |
+| `/history`                     | Paginated table, filterable by user, library, and date range                                  |
+| `/users`, `/users/:id`         | Per-user watch time, top content, device breakdown                                            |
+| `/libraries`, `/libraries/:id` | Per-library totals, most-watched items                                                        |
+| `/settings`                    | Sync intervals, completion threshold, manual re-sync trigger                                  |
 
 Poster art appears as accent in top-content lists, **proxied through the API** so browsers
 need neither direct Jellyfin network access nor a second auth context.
@@ -290,13 +290,13 @@ direction — each layer may import from the one above it, never below.
 Because layer 2 never fetches, the same component genuinely serves several screens rather
 than being copied:
 
-| Component | Used by |
-|---|---|
-| `StatCardRow` | Overview, user detail, library detail |
-| `TopContentList` | Overview, user detail, library detail |
-| `WatchTimeChart` | Overview, user detail, library detail |
+| Component              | Used by                                 |
+| ---------------------- | --------------------------------------- |
+| `StatCardRow`          | Overview, user detail, library detail   |
+| `TopContentList`       | Overview, user detail, library detail   |
+| `WatchTimeChart`       | Overview, user detail, library detail   |
 | `PlaybackHistoryTable` | `/history`, user detail, library detail |
-| `ActiveStreamCard` | Overview (compact), `/live` (full) |
+| `ActiveStreamCard`     | Overview (compact), `/live` (full)      |
 
 **The anti-pattern to avoid:** route-specific branching inside a shared component
 (`if (context === "userPage")`). Variation is expressed through props and composition —

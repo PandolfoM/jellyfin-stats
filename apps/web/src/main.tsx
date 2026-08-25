@@ -12,7 +12,8 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       // A 401 means "log in", not "try again" — retrying it just delays the redirect.
-      retry: (failureCount, error) => (error instanceof ApiError && error.status === 401 ? false : failureCount < 2),
+      retry: (failureCount, error) =>
+        error instanceof ApiError && error.status === 401 ? false : failureCount < 2,
       staleTime: 30_000,
     },
   },

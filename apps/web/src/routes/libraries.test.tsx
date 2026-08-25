@@ -15,7 +15,10 @@ afterEach(() => vi.restoreAllMocks());
 const AUTHENTICATED_BODY = JSON.stringify({ userId: "user-1", userName: "admin", isAdmin: true });
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 const ACTIVE_LIBRARY = {
@@ -72,7 +75,9 @@ describe("Libraries route", () => {
     renderApp("/libraries");
 
     await screen.findByTestId("libraries-route");
-    await waitFor(() => expect(countCalls(calls, "/api/stats/libraries")).toBeGreaterThanOrEqual(1));
+    await waitFor(() =>
+      expect(countCalls(calls, "/api/stats/libraries")).toBeGreaterThanOrEqual(1),
+    );
 
     const params = paramsFor(calls, "/api/stats/libraries");
     expect(params?.get("from")).toBeTruthy();
@@ -84,7 +89,9 @@ describe("Libraries route", () => {
 
     renderApp("/libraries");
     await screen.findByTestId("libraries-route");
-    await waitFor(() => expect(countCalls(calls, "/api/stats/libraries")).toBeGreaterThanOrEqual(1));
+    await waitFor(() =>
+      expect(countCalls(calls, "/api/stats/libraries")).toBeGreaterThanOrEqual(1),
+    );
 
     const originalFrom = paramsFor(calls, "/api/stats/libraries")?.get("from");
     const fromInput = screen.getByLabelText("From");
@@ -96,7 +103,9 @@ describe("Libraries route", () => {
 
     fireEvent.change(fromInput, { target: { value: shiftedFrom } });
 
-    await waitFor(() => expect(paramsFor(calls, "/api/stats/libraries")?.get("from")).toBe(shiftedFrom));
+    await waitFor(() =>
+      expect(paramsFor(calls, "/api/stats/libraries")?.get("from")).toBe(shiftedFrom),
+    );
   });
 
   it("renders a zero-activity library's row alongside an active library's row — the roster is not filtered", async () => {
@@ -122,7 +131,9 @@ describe("Libraries route", () => {
   });
 
   it("shows the panel error on a 500 and does not redirect", async () => {
-    mockFetch({ libraries: () => new Response(JSON.stringify({ error: "internal_error" }), { status: 500 }) });
+    mockFetch({
+      libraries: () => new Response(JSON.stringify({ error: "internal_error" }), { status: 500 }),
+    });
 
     const router = renderApp("/libraries");
     await screen.findByTestId("libraries-route");

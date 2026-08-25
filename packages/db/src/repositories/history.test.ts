@@ -145,7 +145,9 @@ describe("getHistory", () => {
       await seed(db); // lib-1: 5 sessions
 
       await db.insert(libraries).values([{ id: "lib-2", name: "TV", collectionType: "tvshows" }]);
-      await db.insert(items).values([{ id: "item-3", name: "A Show", type: "Series", libraryId: "lib-2" }]);
+      await db
+        .insert(items)
+        .values([{ id: "item-3", name: "A Show", type: "Series", libraryId: "lib-2" }]);
       await db.insert(playbackSessions).values({
         sessionId: "sess-other-lib",
         userId: "user-a",
@@ -172,9 +174,15 @@ describe("getHistory", () => {
   it("returns a zero total for a library with no sessions", async () => {
     await withTestDatabase(async (db) => {
       await seed(db);
-      await db.insert(libraries).values([{ id: "lib-empty", name: "Empty", collectionType: "movies" }]);
+      await db
+        .insert(libraries)
+        .values([{ id: "lib-empty", name: "Empty", collectionType: "movies" }]);
 
-      const { total, rows } = await getHistory(db, { limit: 50, offset: 0, libraryId: "lib-empty" });
+      const { total, rows } = await getHistory(db, {
+        limit: 50,
+        offset: 0,
+        libraryId: "lib-empty",
+      });
 
       expect(total).toBe(0);
       expect(rows).toEqual([]);
@@ -185,8 +193,18 @@ describe("getHistory", () => {
     await withTestDatabase(async (db) => {
       await seed(db);
 
-      const inRange = await getHistory(db, { limit: 50, offset: 0, from: "2026-08-16", to: "2026-08-16" });
-      const outOfRange = await getHistory(db, { limit: 50, offset: 0, from: "2026-08-17", to: "2026-08-18" });
+      const inRange = await getHistory(db, {
+        limit: 50,
+        offset: 0,
+        from: "2026-08-16",
+        to: "2026-08-16",
+      });
+      const outOfRange = await getHistory(db, {
+        limit: 50,
+        offset: 0,
+        from: "2026-08-17",
+        to: "2026-08-18",
+      });
 
       expect(inRange.total).toBe(5);
       expect(outOfRange.total).toBe(0);
@@ -250,6 +268,81 @@ describe("getHistory", () => {
       const { rows } = await getHistory(db, { limit: 2.9, offset: 0 });
 
       expect(rows).toHaveLength(2);
+    });
+  });
+
+  // Zero-duration rows are start/stop churn from a session flapping in and out of
+  // Jellyfin's /Sessions payload, not viewings anyone wants to read. They are
+  // filtered out of history entirely.
+  describe("zero-duration rows", () => {
+    async function seedWithEmptyRows(db: Db): Promise<void> {
+      await seed(db);
+      await db.insert(playbackSessions).values(
+        Array.from({ length: 3 }, (_, index) => ({
+          sessionId: `empty-${index}`,
+          userId: "user-a",
+          itemId: "item-1",
+          deviceId: "dev-1",
+          client: "Chrome",
+          playMethod: "DirectPlay",
+          // Newer than every seeded row, so a missing filter puts these first and
+          // the assertions below cannot pass by accident of ordering.
+          startedAt: new Date(BASE.getTime() + 3_600_000 + index * 60_000),
+          endedAt: new Date(BASE.getTime() + 3_600_000 + index * 60_000),
+          lastSeenAt: new Date(BASE.getTime() + 3_600_000 + index * 60_000),
+          watchMs: 0,
+          completed: false,
+        })),
+      );
+    }
+
+    it("omits them from the returned rows", async () => {
+      await withTestDatabase(async (db) => {
+        await seedWithEmptyRows(db);
+
+        const { rows } = await getHistory(db, { limit: MAX_HISTORY_LIMIT, offset: 0 });
+
+        expect(rows).toHaveLength(5);
+        expect(rows.every((row) => row.watchMs > 0)).toBe(true);
+      });
+    });
+
+    // The row assertion above passes even if the filter is applied only to the row
+    // query and not the count — which would leave `total` claiming 8 and paginate
+    // into an empty final page. This is the case that catches that.
+    it("omits them from the total as well, so pagination does not run off the end", async () => {
+      await withTestDatabase(async (db) => {
+        await seedWithEmptyRows(db);
+
+        const { total } = await getHistory(db, { limit: 2, offset: 0 });
+
+        expect(total).toBe(5);
+      });
+    });
+
+    it("keeps a short but non-zero play, which is a real viewing", async () => {
+      await withTestDatabase(async (db) => {
+        await seedWithEmptyRows(db);
+        await db.insert(playbackSessions).values({
+          sessionId: "brief",
+          userId: "user-a",
+          itemId: "item-1",
+          deviceId: "dev-1",
+          startedAt: new Date(BASE.getTime() + 7_200_000),
+          endedAt: new Date(BASE.getTime() + 7_200_000 + 1),
+          lastSeenAt: new Date(BASE.getTime() + 7_200_000 + 1),
+          // One millisecond. formatDuration renders anything under a minute as
+          // seconds, never "0m", so the boundary the UI shows is watch_ms > 0 —
+          // not some larger "too short to matter" threshold.
+          watchMs: 1,
+          completed: false,
+        });
+
+        const { rows, total } = await getHistory(db, { limit: MAX_HISTORY_LIMIT, offset: 0 });
+
+        expect(total).toBe(6);
+        expect(rows.some((row) => row.watchMs === 1)).toBe(true);
+      });
     });
   });
 

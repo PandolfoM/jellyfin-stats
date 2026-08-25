@@ -42,15 +42,18 @@ describe("reconcileOpenSessions", () => {
     const closed = await reconcileOpenSessions(d);
 
     expect(closed).toBe(1);
-    expect(d.closeSession).toHaveBeenCalledWith(d.db, expect.objectContaining({
-      sessionId: "ps-1",
-      itemId: "item-1",
-      // Ending at lastSeenAt, not now, keeps the record honest — we have no evidence
-      // playback continued past the last observation.
-      at: lastSeenAt,
-      watchedMs: 0,
-      runtimeTicks: null,
-    }));
+    expect(d.closeSession).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({
+        sessionId: "ps-1",
+        itemId: "item-1",
+        // Ending at lastSeenAt, not now, keeps the record honest — we have no evidence
+        // playback continued past the last observation.
+        at: lastSeenAt,
+        watchedMs: 0,
+        runtimeTicks: null,
+      }),
+    );
   });
 
   it("queries using the stale cutoff derived from the poll interval", async () => {
@@ -70,7 +73,13 @@ describe("reconcileOpenSessions", () => {
 
   it("credits no extra watch time when closing a stale session", async () => {
     const d = deps([
-      { sessionId: "ps-1", itemId: "item-1", userId: "user-1", positionTicks: 42, lastSeenAt: new Date(NOW - 3_600_000) },
+      {
+        sessionId: "ps-1",
+        itemId: "item-1",
+        userId: "user-1",
+        positionTicks: 42,
+        lastSeenAt: new Date(NOW - 3_600_000),
+      },
     ]);
 
     await reconcileOpenSessions(d);

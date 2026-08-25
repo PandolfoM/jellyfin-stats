@@ -18,7 +18,10 @@ afterEach(() => vi.restoreAllMocks());
 const AUTHENTICATED_BODY = JSON.stringify({ userId: "user-1", userName: "admin", isAdmin: true });
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 const ACTIVE_USER = {
@@ -99,7 +102,9 @@ describe("Users route", () => {
 
     fireEvent.change(fromInput, { target: { value: shiftedFrom } });
 
-    await waitFor(() => expect(paramsFor(calls, "/api/stats/users")?.get("from")).toBe(shiftedFrom));
+    await waitFor(() =>
+      expect(paramsFor(calls, "/api/stats/users")?.get("from")).toBe(shiftedFrom),
+    );
   });
 
   // The brief's core assertion: a user with zero activity in the range must
@@ -129,7 +134,9 @@ describe("Users route", () => {
   });
 
   it("shows the panel error on a 500 and does not redirect", async () => {
-    mockFetch({ users: () => new Response(JSON.stringify({ error: "internal_error" }), { status: 500 }) });
+    mockFetch({
+      users: () => new Response(JSON.stringify({ error: "internal_error" }), { status: 500 }),
+    });
 
     const router = renderApp("/users");
     await screen.findByTestId("users-route");

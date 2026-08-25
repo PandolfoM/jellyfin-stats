@@ -146,7 +146,12 @@ export interface ShutdownAppArgs {
  * something a test can pin directly — see the "shutdownApp order" tests in
  * main.test.ts, which fail if any step is skipped or reordered.
  */
-export async function shutdownApp({ scheduler, server, liveStreams, context }: ShutdownAppArgs): Promise<void> {
+export async function shutdownApp({
+  scheduler,
+  server,
+  liveStreams,
+  context,
+}: ShutdownAppArgs): Promise<void> {
   await scheduler.stop();
   await closeApiServer(server, liveStreams);
   await closeContext(context);

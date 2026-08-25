@@ -112,7 +112,9 @@ describe("topItemsQuery includes its filters in the key", () => {
 
 describe("historyQuery includes its filters in the key", () => {
   it("changes when `from`/`to` change", () => {
-    expect(historyQuery({}).queryKey).not.toEqual(historyQuery({ from: "2026-01-01", to: "2026-01-31" }).queryKey);
+    expect(historyQuery({}).queryKey).not.toEqual(
+      historyQuery({ from: "2026-01-01", to: "2026-01-31" }).queryKey,
+    );
   });
 
   it("changes when `limit` changes, all else held fixed", () => {
@@ -124,7 +126,9 @@ describe("historyQuery includes its filters in the key", () => {
   });
 
   it("changes when `userId` changes, all else held fixed", () => {
-    expect(historyQuery({ userId: "user-1" }).queryKey).not.toEqual(historyQuery({ userId: "user-2" }).queryKey);
+    expect(historyQuery({ userId: "user-1" }).queryKey).not.toEqual(
+      historyQuery({ userId: "user-2" }).queryKey,
+    );
   });
 
   it("changes when `libraryId` changes, all else held fixed", () => {
@@ -159,25 +163,37 @@ describe("historyQuery includes its filters in the key", () => {
  * to regress silently, which is exactly what a single `overviewQuery`-only
  * guard did in an earlier pass of this file.
  */
-type OverviewQueryData = Awaited<ReturnType<NonNullable<ReturnType<typeof overviewQuery>["queryFn"]>>>;
+type OverviewQueryData = Awaited<
+  ReturnType<NonNullable<ReturnType<typeof overviewQuery>["queryFn"]>>
+>;
 type _OverviewFieldAccessTypechecks = OverviewQueryData["plays"];
 
 type SeriesQueryData = Awaited<ReturnType<NonNullable<ReturnType<typeof seriesQuery>["queryFn"]>>>;
 type _SeriesFieldAccessTypechecks = SeriesQueryData[number]["watchMs"];
 
-type TopItemsQueryData = Awaited<ReturnType<NonNullable<ReturnType<typeof topItemsQuery>["queryFn"]>>>;
+type TopItemsQueryData = Awaited<
+  ReturnType<NonNullable<ReturnType<typeof topItemsQuery>["queryFn"]>>
+>;
 type _TopItemsFieldAccessTypechecks = TopItemsQueryData[number]["itemId"];
 
-type UserStatsQueryData = Awaited<ReturnType<NonNullable<ReturnType<typeof userStatsQuery>["queryFn"]>>>;
+type UserStatsQueryData = Awaited<
+  ReturnType<NonNullable<ReturnType<typeof userStatsQuery>["queryFn"]>>
+>;
 type _UserStatsFieldAccessTypechecks = UserStatsQueryData[number]["userId"];
 
-type UserDetailQueryData = Awaited<ReturnType<NonNullable<ReturnType<typeof userDetailQuery>["queryFn"]>>>;
+type UserDetailQueryData = Awaited<
+  ReturnType<NonNullable<ReturnType<typeof userDetailQuery>["queryFn"]>>
+>;
 // `devices` exists only on UserDetail (not on UserStat, its base interface),
 // so this also proves the guard resolved the right one of the two shapes.
 type _UserDetailFieldAccessTypechecks = UserDetailQueryData["devices"];
 
-type LibraryStatsQueryData = Awaited<ReturnType<NonNullable<ReturnType<typeof libraryStatsQuery>["queryFn"]>>>;
+type LibraryStatsQueryData = Awaited<
+  ReturnType<NonNullable<ReturnType<typeof libraryStatsQuery>["queryFn"]>>
+>;
 type _LibraryStatsFieldAccessTypechecks = LibraryStatsQueryData[number]["libraryId"];
 
-type HistoryQueryData = Awaited<ReturnType<NonNullable<ReturnType<typeof historyQuery>["queryFn"]>>>;
+type HistoryQueryData = Awaited<
+  ReturnType<NonNullable<ReturnType<typeof historyQuery>["queryFn"]>>
+>;
 type _HistoryFieldAccessTypechecks = HistoryQueryData["total"];

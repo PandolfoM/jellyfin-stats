@@ -17,7 +17,10 @@ afterEach(() => vi.restoreAllMocks());
 const AUTHENTICATED_BODY = JSON.stringify({ userId: "user-1", userName: "admin", isAdmin: true });
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 interface FetchOverrides {
@@ -44,11 +47,15 @@ function mockFetch(overrides: FetchOverrides = {}): string[] {
 
       if (url.includes("/api/auth/me")) return jsonResponse(JSON.parse(AUTHENTICATED_BODY));
       if (url.includes("/api/stats/overview")) {
-        return overrides.overview?.() ?? jsonResponse({ plays: 10, watchMs: 600_000, activeUsers: 2, activeItems: 3 });
+        return (
+          overrides.overview?.() ??
+          jsonResponse({ plays: 10, watchMs: 600_000, activeUsers: 2, activeItems: 3 })
+        );
       }
       if (url.includes("/api/stats/series")) return overrides.series?.() ?? jsonResponse([]);
       if (url.includes("/api/stats/top-items")) return overrides.topItems?.() ?? jsonResponse([]);
-      if (url.includes("/api/history")) return overrides.history?.() ?? jsonResponse({ rows: [], total: 0 });
+      if (url.includes("/api/history"))
+        return overrides.history?.() ?? jsonResponse({ rows: [], total: 0 });
 
       throw new Error(`index.test.tsx did not expect a fetch to ${url}`);
     }),
@@ -161,7 +168,8 @@ describe("Overview route", () => {
 
   it("renders resolved data from all four queries", async () => {
     mockFetch({
-      overview: () => jsonResponse({ plays: 42, watchMs: 7_265_000, activeUsers: 3, activeItems: 12 }),
+      overview: () =>
+        jsonResponse({ plays: 42, watchMs: 7_265_000, activeUsers: 3, activeItems: 12 }),
       series: () => jsonResponse([{ day: "2026-01-01", plays: 2, watchMs: 120_000 }]),
       topItems: () =>
         jsonResponse([
@@ -212,7 +220,9 @@ describe("Overview route", () => {
     // show no "No watch time yet" text (WatchTimeChart renders a Skeleton
     // while loading, not the empty state), which would make that check pass
     // vacuously regardless of whether the series data ever arrived.
-    await waitFor(() => expect(document.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(0));
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(0),
+    );
 
     // `series` specifically: WatchTimeChart renders its EmptyState ("No
     // watch time yet") if and only if `points.length === 0`. The mocked
@@ -241,7 +251,9 @@ describe("Overview route", () => {
   });
 
   it("shows an error card and does NOT redirect when a query gets a 500", async () => {
-    mockFetch({ overview: () => new Response(JSON.stringify({ error: "internal_error" }), { status: 500 }) });
+    mockFetch({
+      overview: () => new Response(JSON.stringify({ error: "internal_error" }), { status: 500 }),
+    });
 
     const router = renderOverview();
     await screen.findByTestId("overview-route");
@@ -257,7 +269,8 @@ describe("Overview route", () => {
     // error (the pre-fix behavior) would fail this by never rendering "42"
     // or "Example Movie One" at all, not just by mislabeling the error.
     mockFetch({
-      overview: () => jsonResponse({ plays: 42, watchMs: 7_265_000, activeUsers: 3, activeItems: 12 }),
+      overview: () =>
+        jsonResponse({ plays: 42, watchMs: 7_265_000, activeUsers: 3, activeItems: 12 }),
       series: () => jsonResponse([{ day: "2026-01-01", plays: 2, watchMs: 120_000 }]),
       topItems: () =>
         jsonResponse([
@@ -281,7 +294,9 @@ describe("Overview route", () => {
     expect(await screen.findByText("42")).toBeInTheDocument(); // StatCardRow, from `overview`
     expect(await screen.findByText("Example Movie One")).toBeInTheDocument(); // TopContentList, from `topItems`
 
-    await waitFor(() => expect(document.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(0));
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(0),
+    );
     expect(screen.queryByText("No watch time yet")).not.toBeInTheDocument(); // WatchTimeChart, from `series`
 
     // The three healthy panels must not show an error of their own.

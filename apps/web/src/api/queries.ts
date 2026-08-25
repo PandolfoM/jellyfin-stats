@@ -28,7 +28,10 @@ export type OverviewResponse = InferResponseType<typeof api.api.stats.overview.$
 export type SeriesResponse = InferResponseType<typeof api.api.stats.series.$get, 200>;
 export type TopItemsResponse = InferResponseType<(typeof api.api.stats)["top-items"]["$get"], 200>;
 export type UserStatsResponse = InferResponseType<typeof api.api.stats.users.$get, 200>;
-export type UserDetailResponse = InferResponseType<(typeof api.api.stats.users)[":userId"]["$get"], 200>;
+export type UserDetailResponse = InferResponseType<
+  (typeof api.api.stats.users)[":userId"]["$get"],
+  200
+>;
 export type LibraryStatsResponse = InferResponseType<typeof api.api.stats.libraries.$get, 200>;
 export type HistoryResponse = InferResponseType<typeof api.api.history.$get, 200>;
 export type SettingsResponse = InferResponseType<typeof api.api.settings.$get, 200>;
@@ -65,7 +68,8 @@ export interface HistoryQueryOptions {
 const queryKeys = {
   overview: (range: DateRange) => ["stats", "overview", range] as const,
   series: (range: DateRange) => ["stats", "series", range] as const,
-  topItems: (range: DateRange, opts: TopItemsOptions) => ["stats", "top-items", range, opts] as const,
+  topItems: (range: DateRange, opts: TopItemsOptions) =>
+    ["stats", "top-items", range, opts] as const,
   users: (range: DateRange) => ["stats", "users", range] as const,
   userDetail: (userId: string, range: DateRange) => ["stats", "users", userId, range] as const,
   libraries: (range: DateRange) => ["stats", "libraries", range] as const,
@@ -76,7 +80,8 @@ const queryKeys = {
 export function overviewQuery(range: DateRange) {
   return queryOptions({
     queryKey: queryKeys.overview(range),
-    queryFn: async () => unwrap<OverviewResponse>(await api.api.stats.overview.$get({ query: range })),
+    queryFn: async () =>
+      unwrap<OverviewResponse>(await api.api.stats.overview.$get({ query: range })),
   });
 }
 
@@ -108,7 +113,8 @@ export function topItemsQuery(range: DateRange, opts: TopItemsOptions) {
 export function userStatsQuery(range: DateRange) {
   return queryOptions({
     queryKey: queryKeys.users(range),
-    queryFn: async () => unwrap<UserStatsResponse>(await api.api.stats.users.$get({ query: range })),
+    queryFn: async () =>
+      unwrap<UserStatsResponse>(await api.api.stats.users.$get({ query: range })),
   });
 }
 
@@ -136,7 +142,8 @@ export function userDetailQuery(userId: string, range: DateRange) {
 export function libraryStatsQuery(range: DateRange) {
   return queryOptions({
     queryKey: queryKeys.libraries(range),
-    queryFn: async () => unwrap<LibraryStatsResponse>(await api.api.stats.libraries.$get({ query: range })),
+    queryFn: async () =>
+      unwrap<LibraryStatsResponse>(await api.api.stats.libraries.$get({ query: range })),
   });
 }
 

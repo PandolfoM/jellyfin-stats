@@ -18,10 +18,17 @@ import { renderApp } from "../test/renderApp";
 
 afterEach(() => vi.restoreAllMocks());
 
-const AUTHENTICATED_BODY = JSON.stringify({ userId: "session-user", userName: "admin", isAdmin: true });
+const AUTHENTICATED_BODY = JSON.stringify({
+  userId: "session-user",
+  userName: "admin",
+  isAdmin: true,
+});
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 function userIdFromDetailUrl(url: string): string {
@@ -45,7 +52,9 @@ function mockFetch(overrides: FetchOverrides = {}): string[] {
 
       if (url.includes("/api/auth/me")) return jsonResponse(JSON.parse(AUTHENTICATED_BODY));
       if (url.includes("/api/stats/users/")) {
-        return overrides.detail?.(userIdFromDetailUrl(url)) ?? jsonResponse({ error: "not_found" }, 404);
+        return (
+          overrides.detail?.(userIdFromDetailUrl(url)) ?? jsonResponse({ error: "not_found" }, 404)
+        );
       }
       if (url.includes("/api/stats/top-items")) {
         const params = new URL(url, "http://localhost").searchParams;
@@ -110,7 +119,14 @@ describe("User detail route", () => {
   it("does NOT render the not-found state for a real user with zero activity in the range", async () => {
     mockFetch({
       detail: (userId) =>
-        jsonResponse({ userId, name: "Grace Hopper", isAdmin: false, plays: 0, watchMs: 0, devices: [] }),
+        jsonResponse({
+          userId,
+          name: "Grace Hopper",
+          isAdmin: false,
+          plays: 0,
+          watchMs: 0,
+          devices: [],
+        }),
     });
 
     renderApp("/users/user-quiet-1");
@@ -126,7 +142,14 @@ describe("User detail route", () => {
   it("shows Plays/Watch time but not Active users/Active items", async () => {
     mockFetch({
       detail: (userId) =>
-        jsonResponse({ userId, name: "Ada Lovelace", isAdmin: false, plays: 7, watchMs: 90_000, devices: [] }),
+        jsonResponse({
+          userId,
+          name: "Ada Lovelace",
+          isAdmin: false,
+          plays: 7,
+          watchMs: 90_000,
+          devices: [],
+        }),
     });
 
     renderApp("/users/user-alpha-1");
@@ -160,19 +183,35 @@ describe("User detail route", () => {
   it("filters top-items to this user via topItemsQuery's userId option", async () => {
     const calls = mockFetch({
       detail: (userId) =>
-        jsonResponse({ userId, name: "Ada Lovelace", isAdmin: false, plays: 7, watchMs: 90_000, devices: [] }),
+        jsonResponse({
+          userId,
+          name: "Ada Lovelace",
+          isAdmin: false,
+          plays: 7,
+          watchMs: 90_000,
+          devices: [],
+        }),
     });
 
     renderApp("/users/user-alpha-1");
 
-    await waitFor(() => expect(countCalls(calls, "/api/stats/top-items")).toBeGreaterThanOrEqual(1));
+    await waitFor(() =>
+      expect(countCalls(calls, "/api/stats/top-items")).toBeGreaterThanOrEqual(1),
+    );
     expect(paramsFor(calls, "/api/stats/top-items")?.get("userId")).toBe("user-alpha-1");
   });
 
   it("filters playback history to this user, with page 1's limit/offset", async () => {
     const calls = mockFetch({
       detail: (userId) =>
-        jsonResponse({ userId, name: "Ada Lovelace", isAdmin: false, plays: 7, watchMs: 90_000, devices: [] }),
+        jsonResponse({
+          userId,
+          name: "Ada Lovelace",
+          isAdmin: false,
+          plays: 7,
+          watchMs: 90_000,
+          devices: [],
+        }),
     });
 
     renderApp("/users/user-alpha-1");
@@ -186,7 +225,14 @@ describe("User detail route", () => {
   it("clicking Next on the playback history table requests the next page's offset", async () => {
     const calls = mockFetch({
       detail: (userId) =>
-        jsonResponse({ userId, name: "Ada Lovelace", isAdmin: false, plays: 7, watchMs: 90_000, devices: [] }),
+        jsonResponse({
+          userId,
+          name: "Ada Lovelace",
+          isAdmin: false,
+          plays: 7,
+          watchMs: 90_000,
+          devices: [],
+        }),
       history: (params) => {
         const offset = Number(params.get("offset") ?? 0);
         const rows = Array.from({ length: Math.min(25, 40 - offset) }, (_, i) => ({
@@ -224,7 +270,14 @@ describe("User detail route", () => {
   it("shows only the failing panel's error when top-items 500s, and still renders the rest", async () => {
     mockFetch({
       detail: (userId) =>
-        jsonResponse({ userId, name: "Ada Lovelace", isAdmin: false, plays: 7, watchMs: 90_000, devices: [] }),
+        jsonResponse({
+          userId,
+          name: "Ada Lovelace",
+          isAdmin: false,
+          plays: 7,
+          watchMs: 90_000,
+          devices: [],
+        }),
       topItems: () => new Response(JSON.stringify({ error: "internal_error" }), { status: 500 }),
     });
 

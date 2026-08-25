@@ -65,7 +65,9 @@ export function LibraryStatsTable({ libraries, loading }: LibraryStatsTableProps
               </Link>
             </TableCell>
             <TableCell>
-              {library.collectionType !== null && <Badge variant="secondary">{library.collectionType}</Badge>}
+              {library.collectionType !== null && (
+                <Badge variant="secondary">{library.collectionType}</Badge>
+              )}
             </TableCell>
             <TableCell className="text-right">{formatCount(library.plays)}</TableCell>
             <TableCell className="text-right">{formatDuration(library.watchMs)}</TableCell>

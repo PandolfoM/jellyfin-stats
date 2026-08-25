@@ -193,27 +193,27 @@ not a hang. Two ways to actually confirm it's alive:
 
   Run it twice a few seconds apart; `session-poll`'s `last_run_at` should have moved
   forward by roughly `SESSION_POLL_INTERVAL_MS` each time. A scheduled job only logs on
-  *failure* (`"scheduled job failed"`), so silence in `docker compose logs app` between
+  _failure_ (`"scheduled job failed"`), so silence in `docker compose logs app` between
   the three startup lines is the healthy case, not a symptom.
 
 ## Configuration
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `JELLYFIN_URL` | — | Base URL of your Jellyfin server (required); must be reachable *from inside a container* under `docker compose up -d` — see [Running the app](#running-the-app) |
-| `JELLYFIN_API_KEY` | — | Jellyfin API key used for syncing (required) |
-| `DATABASE_URL` | — | Postgres connection string (required) |
-| `FALLBACK_ADMIN_USER` | unset | Optional emergency admin username; see [Authentication](#authentication) |
-| `FALLBACK_ADMIN_PASSWORD` | unset | Optional emergency admin password; both must be set to activate |
-| `SESSION_POLL_INTERVAL_MS` | `5000` | How often active sessions are polled |
-| `REFERENCE_SYNC_INTERVAL_MS` | `900000` | How often users and libraries refresh |
-| `COMPLETION_THRESHOLD` | `0.9` | Fraction of runtime that counts as watched |
-| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
-| `PORT` | `3000` | Port the HTTP API listens on |
-| `COOKIE_SECURE` | `false` | Marks the session cookie `Secure`; see [Running the API](#running-the-api) |
-| `SESSION_TTL_HOURS` | `168` | Session lifetime (sliding); see [Running the API](#running-the-api) |
-| `TRUST_PROXY_HEADERS` | `false` | Trust `X-Forwarded-For` for rate limiting; see [Running the API](#running-the-api) |
-| `TZ` | unset (container runs UTC) | IANA timezone (e.g. `America/New_York`) the three nightly maintenance jobs are scheduled against; see the note below |
+| Variable                     | Default                    | Purpose                                                                                                                                                         |
+| ---------------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `JELLYFIN_URL`               | —                          | Base URL of your Jellyfin server (required); must be reachable _from inside a container_ under `docker compose up -d` — see [Running the app](#running-the-app) |
+| `JELLYFIN_API_KEY`           | —                          | Jellyfin API key used for syncing (required)                                                                                                                    |
+| `DATABASE_URL`               | —                          | Postgres connection string (required)                                                                                                                           |
+| `FALLBACK_ADMIN_USER`        | unset                      | Optional emergency admin username; see [Authentication](#authentication)                                                                                        |
+| `FALLBACK_ADMIN_PASSWORD`    | unset                      | Optional emergency admin password; both must be set to activate                                                                                                 |
+| `SESSION_POLL_INTERVAL_MS`   | `5000`                     | How often active sessions are polled                                                                                                                            |
+| `REFERENCE_SYNC_INTERVAL_MS` | `900000`                   | How often users and libraries refresh                                                                                                                           |
+| `COMPLETION_THRESHOLD`       | `0.9`                      | Fraction of runtime that counts as watched                                                                                                                      |
+| `LOG_LEVEL`                  | `info`                     | `debug`, `info`, `warn`, or `error`                                                                                                                             |
+| `PORT`                       | `3000`                     | Port the HTTP API listens on                                                                                                                                    |
+| `COOKIE_SECURE`              | `false`                    | Marks the session cookie `Secure`; see [Running the API](#running-the-api)                                                                                      |
+| `SESSION_TTL_HOURS`          | `168`                      | Session lifetime (sliding); see [Running the API](#running-the-api)                                                                                             |
+| `TRUST_PROXY_HEADERS`        | `false`                    | Trust `X-Forwarded-For` for rate limiting; see [Running the API](#running-the-api)                                                                              |
+| `TZ`                         | unset (container runs UTC) | IANA timezone (e.g. `America/New_York`) the three nightly maintenance jobs are scheduled against; see the note below                                            |
 
 **Nothing sets `TZ` for you.** `item-sync`, `rollup-recompute`, and `session-cleanup` run
 at 03:00/03:30/04:00 in whatever timezone the process sees, chosen to land during quiet
@@ -241,11 +241,11 @@ be an admin. A successful login sets an opaque, httpOnly, `SameSite=Lax` session
 (`jfstats_session`); the session record itself lives server-side in Postgres, not in the
 cookie.
 
-| Endpoint | Auth | Notes |
-|---|---|---|
-| `POST /api/auth/login` | none | Body: `{ "username": "...", "password": "..." }`. Rate-limited to 10 attempts per 15 minutes per client (see `TRUST_PROXY_HEADERS` below). On success: `200` with `{ userId, userName, isAdmin: true }`, and the session cookie is set. Otherwise: `400 invalid_request` (malformed body), `401 invalid_credentials`, `403 not_an_administrator` (a valid Jellyfin login that isn't an admin), `429 too_many_attempts`, or `503 jellyfin_unavailable`. |
-| `POST /api/auth/logout` | none | Destroys the session and clears the cookie. Always `200 { ok: true }`, even with no session present. |
-| `GET /api/auth/me` | session cookie | `200` with `{ userId, userName, isAdmin }` if the cookie names a live admin session, else `401 unauthenticated`. Goes through the same admin gate as the data routes below, so it re-checks admin status and refreshes both the session and the cookie — polling it keeps a session alive on both sides, not just server-side. |
+| Endpoint                | Auth           | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ----------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `POST /api/auth/login`  | none           | Body: `{ "username": "...", "password": "..." }`. Rate-limited to 10 attempts per 15 minutes per client (see `TRUST_PROXY_HEADERS` below). On success: `200` with `{ userId, userName, isAdmin: true }`, and the session cookie is set. Otherwise: `400 invalid_request` (malformed body), `401 invalid_credentials`, `403 not_an_administrator` (a valid Jellyfin login that isn't an admin), `429 too_many_attempts`, or `503 jellyfin_unavailable`. |
+| `POST /api/auth/logout` | none           | Destroys the session and clears the cookie. Always `200 { ok: true }`, even with no session present.                                                                                                                                                                                                                                                                                                                                                   |
+| `GET /api/auth/me`      | session cookie | `200` with `{ userId, userName, isAdmin }` if the cookie names a live admin session, else `401 unauthenticated`. Goes through the same admin gate as the data routes below, so it re-checks admin status and refreshes both the session and the cookie — polling it keeps a session alive on both sides, not just server-side.                                                                                                                         |
 
 An optional emergency fallback admin (`FALLBACK_ADMIN_USER` / `FALLBACK_ADMIN_PASSWORD`,
 both required together to activate, and commented out in `.env.example`) is checked
@@ -268,17 +268,17 @@ unparsable or out-of-order range answers `400 { "error": "invalid_range" }`, as 
 range spanning more than 1000 days — the day-by-day series is built from a
 `generate_series` spine, so an unbounded span turns one request into millions of rows.
 
-| Endpoint | Query parameters | Notes |
-|---|---|---|
-| `GET /api/stats/overview` | `from`, `to` | Aggregate totals for the range. |
-| `GET /api/stats/series` | `from`, `to` | Per-day watch-time series for the range. |
-| `GET /api/stats/top-items` | `from`, `to`, `limit` (default `10`, max `100`), `libraryId`, `userId` | Most-watched items, optionally scoped to a library or a user. |
-| `GET /api/stats/users` | `from`, `to` | Per-user totals. |
-| `GET /api/stats/users/:userId` | `from`, `to` | One user's detail; `404 { "error": "not_found" }` for an unknown id. |
-| `GET /api/stats/libraries` | `from`, `to` | Per-library totals. |
-| `GET /api/history` | `limit` (default `50`, max `200`), `offset` (default `0`), `userId`, `libraryId`, `from`, `to` | Paginated playback history. Unlike the `/api/stats/*` routes, `from`/`to` here are not defaulted: if neither is given, no date filter is applied at all. Giving one without the other fills in the missing side using the same 30-day default as the stats routes. |
-| `GET /api/live` | — | Server-Sent Events. Emits a `sessions` event (a JSON array) immediately on connect with whatever is currently playing, then again on every change; sends a heartbeat comment roughly every 25s so idle-timeout proxies don't close the connection. |
-| `GET /api/images/items/:itemId` | `tag`, `maxWidth` (default `400`, max `1000`) | Proxies one item's poster art from Jellyfin, so the browser needs neither the Jellyfin API key nor direct network access to Jellyfin. `itemId` must be a 32-character hex GUID; anything else answers `400 { "error": "invalid_item_id" }` before any outbound request is made. Responses are cached `private` for 30 days, since they sit behind the admin gate. |
+| Endpoint                        | Query parameters                                                                               | Notes                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/stats/overview`       | `from`, `to`                                                                                   | Aggregate totals for the range.                                                                                                                                                                                                                                                                                                                                   |
+| `GET /api/stats/series`         | `from`, `to`                                                                                   | Per-day watch-time series for the range.                                                                                                                                                                                                                                                                                                                          |
+| `GET /api/stats/top-items`      | `from`, `to`, `limit` (default `10`, max `100`), `libraryId`, `userId`                         | Most-watched items, optionally scoped to a library or a user.                                                                                                                                                                                                                                                                                                     |
+| `GET /api/stats/users`          | `from`, `to`                                                                                   | Per-user totals.                                                                                                                                                                                                                                                                                                                                                  |
+| `GET /api/stats/users/:userId`  | `from`, `to`                                                                                   | One user's detail; `404 { "error": "not_found" }` for an unknown id.                                                                                                                                                                                                                                                                                              |
+| `GET /api/stats/libraries`      | `from`, `to`                                                                                   | Per-library totals.                                                                                                                                                                                                                                                                                                                                               |
+| `GET /api/history`              | `limit` (default `50`, max `200`), `offset` (default `0`), `userId`, `libraryId`, `from`, `to` | Paginated playback history. Unlike the `/api/stats/*` routes, `from`/`to` here are not defaulted: if neither is given, no date filter is applied at all. Giving one without the other fills in the missing side using the same 30-day default as the stats routes.                                                                                                |
+| `GET /api/live`                 | —                                                                                              | Server-Sent Events. Emits a `sessions` event (a JSON array) immediately on connect with whatever is currently playing, then again on every change; sends a heartbeat comment roughly every 25s so idle-timeout proxies don't close the connection.                                                                                                                |
+| `GET /api/images/items/:itemId` | `tag`, `maxWidth` (default `400`, max `1000`)                                                  | Proxies one item's poster art from Jellyfin, so the browser needs neither the Jellyfin API key nor direct network access to Jellyfin. `itemId` must be a 32-character hex GUID; anything else answers `400 { "error": "invalid_item_id" }` before any outbound request is made. Responses are cached `private` for 30 days, since they sit behind the admin gate. |
 
 ### Running the API
 

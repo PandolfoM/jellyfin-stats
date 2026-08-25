@@ -42,7 +42,12 @@ export function ActivityFeed({ rows, loading }: ActivityFeedProps) {
   }
 
   if (rows.length === 0) {
-    return <EmptyState title="No recent activity" description="Nothing has played in the selected range." />;
+    return (
+      <EmptyState
+        title="No recent activity"
+        description="Nothing has played in the selected range."
+      />
+    );
   }
 
   return (

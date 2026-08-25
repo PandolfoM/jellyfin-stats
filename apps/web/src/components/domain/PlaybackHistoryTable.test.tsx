@@ -53,7 +53,9 @@ function makeRow(index: number, overrides: Partial<PlaybackHistoryRow> = {}): Pl
   };
 }
 
-const ALL_ROWS: PlaybackHistoryRow[] = Array.from({ length: TOTAL_ROWS }, (_, index) => makeRow(index));
+const ALL_ROWS: PlaybackHistoryRow[] = Array.from({ length: TOTAL_ROWS }, (_, index) =>
+  makeRow(index),
+);
 
 function pageSlice(page: number): PlaybackHistoryRow[] {
   const start = (page - 1) * PAGE_SIZE;
@@ -61,7 +63,9 @@ function pageSlice(page: number): PlaybackHistoryRow[] {
 }
 
 function visibleRowIds(): string[] {
-  return screen.getAllByTestId("playback-history-row").map((row) => row.getAttribute("data-row-id") ?? "");
+  return screen
+    .getAllByTestId("playback-history-row")
+    .map((row) => row.getAttribute("data-row-id") ?? "");
 }
 
 /**
@@ -187,7 +191,9 @@ describe("PlaybackHistoryTable rendering", () => {
   it("renders a row with placeholder names for deleted media plainly, with no special-casing", () => {
     render(
       <PlaybackHistoryTable
-        rows={[makeRow(0, { itemName: "Unknown item", userName: "Unknown user", itemType: "Unknown" })]}
+        rows={[
+          makeRow(0, { itemName: "Unknown item", userName: "Unknown user", itemType: "Unknown" }),
+        ]}
         total={1}
         page={1}
         pageSize={PAGE_SIZE}
@@ -205,7 +211,14 @@ describe("PlaybackHistoryTable rendering", () => {
 
   it("shows a loading skeleton and no table while loading", () => {
     render(
-      <PlaybackHistoryTable rows={[]} total={0} page={1} pageSize={PAGE_SIZE} onPageChange={() => {}} loading={true} />,
+      <PlaybackHistoryTable
+        rows={[]}
+        total={0}
+        page={1}
+        pageSize={PAGE_SIZE}
+        onPageChange={() => {}}
+        loading={true}
+      />,
     );
 
     expect(screen.getByLabelText("Loading playback history")).toBeInTheDocument();

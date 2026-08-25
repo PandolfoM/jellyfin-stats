@@ -56,7 +56,13 @@ describe("sync pipeline", () => {
   it("records a full stream and agrees with the nightly recompute", async () => {
     await withTestDatabase(async (db) => {
       await upsertItems(db, [
-        { id: "item-1", type: "Movie", name: "Demo Movie", libraryId: "lib-1", runtimeTicks: 60_000 * 10_000 },
+        {
+          id: "item-1",
+          type: "Movie",
+          name: "Demo Movie",
+          libraryId: "lib-1",
+          runtimeTicks: 60_000 * 10_000,
+        },
       ]);
 
       const snapshots = memorySnapshotStore();
@@ -117,7 +123,9 @@ describe("sync pipeline", () => {
 
   it("does not double count when the same poll is replayed", async () => {
     await withTestDatabase(async (db) => {
-      await upsertItems(db, [{ id: "item-1", type: "Movie", name: "Demo Movie", libraryId: "lib-1" }]);
+      await upsertItems(db, [
+        { id: "item-1", type: "Movie", name: "Demo Movie", libraryId: "lib-1" },
+      ]);
 
       const snapshots = memorySnapshotStore();
       const current = [liveSession()];
@@ -147,7 +155,9 @@ describe("sync pipeline", () => {
 
   it("agrees with the recompute for a stream that crosses midnight", async () => {
     await withTestDatabase(async (db) => {
-      await upsertItems(db, [{ id: "item-1", type: "Movie", name: "Demo Movie", libraryId: "lib-1" }]);
+      await upsertItems(db, [
+        { id: "item-1", type: "Movie", name: "Demo Movie", libraryId: "lib-1" },
+      ]);
 
       const beforeMidnight = new Date("2026-08-16T23:55:00Z").getTime();
       const snapshots = memorySnapshotStore();
@@ -186,7 +196,11 @@ describe("sync pipeline", () => {
 
       const incrementalWatchMs = incremental[0]?.watchMs ?? 0;
 
-      await recomputeRollupRange(db, new Date("2026-08-15T00:00:00Z"), new Date("2026-08-18T00:00:00Z"));
+      await recomputeRollupRange(
+        db,
+        new Date("2026-08-15T00:00:00Z"),
+        new Date("2026-08-18T00:00:00Z"),
+      );
 
       const recomputed = await db.select().from(playbackRollupDaily);
       expect(recomputed).toHaveLength(1);
@@ -202,7 +216,13 @@ describe("sync pipeline", () => {
       // window and the recompute range below deterministic and mutually consistent,
       // regardless of when the test actually runs.
       const seedClock = new Date("2026-08-17T00:00:00Z").getTime();
-      const data = generateSeedData({ days: 30, users: 3, items: 20, seed: 5, now: () => seedClock });
+      const data = generateSeedData({
+        days: 30,
+        users: 3,
+        items: 20,
+        seed: 5,
+        now: () => seedClock,
+      });
 
       await upsertItems(db, data.items);
       await db.insert(playbackSessions).values(data.sessions);

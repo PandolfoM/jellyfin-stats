@@ -18,10 +18,17 @@ import { renderApp } from "../test/renderApp";
 
 afterEach(() => vi.restoreAllMocks());
 
-const AUTHENTICATED_BODY = JSON.stringify({ userId: "user-1", userName: "Ada Lovelace", isAdmin: true });
+const AUTHENTICATED_BODY = JSON.stringify({
+  userId: "user-1",
+  userName: "Ada Lovelace",
+  isAdmin: true,
+});
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 // Synthetic values only — see the repo-wide rule against real hostnames in
@@ -47,8 +54,10 @@ function mockFetch(overrides: FetchOverrides = {}): string[] {
       calls.push(url);
 
       if (url.includes("/api/auth/me")) return jsonResponse(JSON.parse(AUTHENTICATED_BODY));
-      if (url.includes("/api/auth/logout")) return overrides.logout?.() ?? jsonResponse({ ok: true });
-      if (url.includes("/api/settings")) return overrides.settings?.() ?? jsonResponse(SETTINGS_FIXTURE);
+      if (url.includes("/api/auth/logout"))
+        return overrides.logout?.() ?? jsonResponse({ ok: true });
+      if (url.includes("/api/settings"))
+        return overrides.settings?.() ?? jsonResponse(SETTINGS_FIXTURE);
 
       throw new Error(`settings.test.tsx did not expect a fetch to ${url}`);
     }),
@@ -88,7 +97,9 @@ describe("Settings route", () => {
   });
 
   it("shows the panel error for configuration but still shows the account and logout control on a 500", async () => {
-    mockFetch({ settings: () => new Response(JSON.stringify({ error: "internal_error" }), { status: 500 }) });
+    mockFetch({
+      settings: () => new Response(JSON.stringify({ error: "internal_error" }), { status: 500 }),
+    });
 
     renderApp("/settings");
 

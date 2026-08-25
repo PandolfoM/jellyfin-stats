@@ -229,10 +229,7 @@ describe("playback repositories", () => {
       const rewatchAt = new Date(START.getTime() + 120_000);
       await openSession(db, { ...OPEN, at: rewatchAt });
 
-      const rows = await db
-        .select()
-        .from(playbackSessions)
-        .orderBy(playbackSessions.startedAt);
+      const rows = await db.select().from(playbackSessions).orderBy(playbackSessions.startedAt);
 
       expect(rows).toHaveLength(2);
       expect(rows[0]).toMatchObject({ watchMs: 1_000, positionTicks: 95 });
@@ -305,7 +302,12 @@ describe("playback repositories", () => {
   it("finds only open sessions older than the cutoff", async () => {
     await withTestDatabase(async (db) => {
       await openSession(db, OPEN);
-      await openSession(db, { ...OPEN, sessionId: "ps-2", itemId: "item-2", at: new Date(START.getTime() + 60_000) });
+      await openSession(db, {
+        ...OPEN,
+        sessionId: "ps-2",
+        itemId: "item-2",
+        at: new Date(START.getTime() + 60_000),
+      });
 
       const stale = await findStaleOpenSessions(db, new Date(START.getTime() + 30_000));
 
@@ -316,7 +318,14 @@ describe("playback repositories", () => {
 
   it("adds to an existing rollup row rather than replacing it", async () => {
     await withTestDatabase(async (db) => {
-      const delta = { day: "2026-08-16", userId: "user-1", itemId: "item-1", libraryId: "lib-1", playCount: 1, watchMs: 5_000 };
+      const delta = {
+        day: "2026-08-16",
+        userId: "user-1",
+        itemId: "item-1",
+        libraryId: "lib-1",
+        playCount: 1,
+        watchMs: 5_000,
+      };
 
       await applyRollupDelta(db, delta);
       await applyRollupDelta(db, delta);
@@ -331,18 +340,47 @@ describe("playback repositories", () => {
     await withTestDatabase(async (db) => {
       // Two real sessions on the same day for the same user and item.
       await db.insert(playbackSessions).values([
-        { sessionId: "ps-1", itemId: "item-1", userId: "user-1", startedAt: START, lastSeenAt: START, endedAt: new Date(START.getTime() + 60_000), watchMs: 6_000 },
-        { sessionId: "ps-2", itemId: "item-1", userId: "user-1", startedAt: START, lastSeenAt: START, endedAt: new Date(START.getTime() + 120_000), watchMs: 4_000 },
+        {
+          sessionId: "ps-1",
+          itemId: "item-1",
+          userId: "user-1",
+          startedAt: START,
+          lastSeenAt: START,
+          endedAt: new Date(START.getTime() + 60_000),
+          watchMs: 6_000,
+        },
+        {
+          sessionId: "ps-2",
+          itemId: "item-1",
+          userId: "user-1",
+          startedAt: START,
+          lastSeenAt: START,
+          endedAt: new Date(START.getTime() + 120_000),
+          watchMs: 4_000,
+        },
       ]);
       // A drifted rollup row, as if an incremental write had been lost.
-      await applyRollupDelta(db, { day: "2026-08-16", userId: "user-1", itemId: "item-1", libraryId: null, playCount: 1, watchMs: 999 });
+      await applyRollupDelta(db, {
+        day: "2026-08-16",
+        userId: "user-1",
+        itemId: "item-1",
+        libraryId: null,
+        playCount: 1,
+        watchMs: 999,
+      });
 
-      await recomputeRollupRange(db, new Date("2026-08-16T00:00:00Z"), new Date("2026-08-17T00:00:00Z"));
+      await recomputeRollupRange(
+        db,
+        new Date("2026-08-16T00:00:00Z"),
+        new Date("2026-08-17T00:00:00Z"),
+      );
 
       const rows = await db
         .select()
         .from(playbackRollupDaily)
-        .where(and(eq(playbackRollupDaily.userId, "user-1"), eq(playbackRollupDaily.itemId, "item-1")));
+        .where(
+          and(eq(playbackRollupDaily.userId, "user-1"), eq(playbackRollupDaily.itemId, "item-1")),
+        );
 
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({ playCount: 2, watchMs: 10_000 });
@@ -378,7 +416,11 @@ describe("playback repositories", () => {
       expect(incremental).toHaveLength(1);
       expect(incremental[0]).toMatchObject({ playCount: 0, watchMs: 3_600_000 });
 
-      await recomputeRollupRange(db, new Date("2026-08-16T00:00:00Z"), new Date("2026-08-18T00:00:00Z"));
+      await recomputeRollupRange(
+        db,
+        new Date("2026-08-16T00:00:00Z"),
+        new Date("2026-08-18T00:00:00Z"),
+      );
 
       const recomputed = await db.select().from(playbackRollupDaily);
       expect(recomputed).toHaveLength(1);
@@ -418,7 +460,11 @@ describe("playback repositories", () => {
         },
       ]);
 
-      await recomputeRollupRange(db, new Date("2026-08-16T00:00:00Z"), new Date("2026-08-18T00:00:00Z"));
+      await recomputeRollupRange(
+        db,
+        new Date("2026-08-16T00:00:00Z"),
+        new Date("2026-08-18T00:00:00Z"),
+      );
 
       const rows = await db.select().from(playbackRollupDaily);
       expect(rows).toHaveLength(1);
@@ -429,9 +475,20 @@ describe("playback repositories", () => {
 
   it("removes rollup rows in range that no longer have sessions", async () => {
     await withTestDatabase(async (db) => {
-      await applyRollupDelta(db, { day: "2026-08-16", userId: "ghost", itemId: "item-x", libraryId: null, playCount: 3, watchMs: 300 });
+      await applyRollupDelta(db, {
+        day: "2026-08-16",
+        userId: "ghost",
+        itemId: "item-x",
+        libraryId: null,
+        playCount: 3,
+        watchMs: 300,
+      });
 
-      await recomputeRollupRange(db, new Date("2026-08-16T00:00:00Z"), new Date("2026-08-17T00:00:00Z"));
+      await recomputeRollupRange(
+        db,
+        new Date("2026-08-16T00:00:00Z"),
+        new Date("2026-08-17T00:00:00Z"),
+      );
 
       const rows = await db.select().from(playbackRollupDaily);
       expect(rows).toEqual([]);
@@ -482,7 +539,10 @@ describe("playback repositories", () => {
 
       await recomputeRollupRange(db, from, to);
 
-      const firstPass = await db.select().from(playbackRollupDaily).orderBy(playbackRollupDaily.day);
+      const firstPass = await db
+        .select()
+        .from(playbackRollupDaily)
+        .orderBy(playbackRollupDaily.day);
       expect(firstPass).toHaveLength(2);
       expect(firstPass[0]).toMatchObject({ day: "2026-08-16", playCount: 2, watchMs: 3_000 });
       expect(firstPass[1]).toMatchObject({ day: "2026-08-17", playCount: 1, watchMs: 3_000 });
@@ -493,7 +553,10 @@ describe("playback repositories", () => {
       // violation instead of cleanly replacing the rows.
       await recomputeRollupRange(db, from, to);
 
-      const secondPass = await db.select().from(playbackRollupDaily).orderBy(playbackRollupDaily.day);
+      const secondPass = await db
+        .select()
+        .from(playbackRollupDaily)
+        .orderBy(playbackRollupDaily.day);
       expect(secondPass).toHaveLength(2);
       expect(secondPass[0]).toMatchObject({ day: "2026-08-16", playCount: 2, watchMs: 3_000 });
       expect(secondPass[1]).toMatchObject({ day: "2026-08-17", playCount: 1, watchMs: 3_000 });
@@ -513,7 +576,11 @@ describe("playback repositories", () => {
         watchMs: 500,
       });
 
-      await recomputeRollupRange(db, new Date("2026-08-16T05:00:00Z"), new Date("2026-08-17T05:00:00Z"));
+      await recomputeRollupRange(
+        db,
+        new Date("2026-08-16T05:00:00Z"),
+        new Date("2026-08-17T05:00:00Z"),
+      );
 
       const rows = await db.select().from(playbackRollupDaily);
       expect(rows).toEqual([]);
@@ -522,7 +589,9 @@ describe("playback repositories", () => {
 
   it("resolves library_id from the items table when the caller doesn't supply one", async () => {
     await withTestDatabase(async (db) => {
-      await db.insert(items).values({ id: "item-1", libraryId: "lib-1", type: "Movie", name: "The Movie" });
+      await db
+        .insert(items)
+        .values({ id: "item-1", libraryId: "lib-1", type: "Movie", name: "The Movie" });
 
       // No libraryId passed at all — this is how the applier calls it. Before the fix,
       // the applier had no way to know the item's library and always passed null,

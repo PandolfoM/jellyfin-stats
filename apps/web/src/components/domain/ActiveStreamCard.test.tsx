@@ -102,7 +102,11 @@ describe("ActiveStreamCard", () => {
   });
 
   it("renders one card per distinct session when used in a list, keyed by sessionId", () => {
-    const other: LiveSession = { ...BASE_SESSION, sessionId: "session-bbbb", itemName: "Sample Movie Two" };
+    const other: LiveSession = {
+      ...BASE_SESSION,
+      sessionId: "session-bbbb",
+      itemName: "Sample Movie Two",
+    };
     render(
       <>
         <ActiveStreamCard session={BASE_SESSION} variant="full" />

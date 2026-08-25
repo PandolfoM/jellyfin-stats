@@ -40,7 +40,9 @@ describe("TopContentList", () => {
   });
 
   it("renders a custom emptyMessage when given one", () => {
-    render(<TopContentList items={[]} loading={false} emptyMessage="No plays for this library yet" />);
+    render(
+      <TopContentList items={[]} loading={false} emptyMessage="No plays for this library yet" />,
+    );
 
     expect(screen.getByText("No plays for this library yet")).toBeInTheDocument();
   });
@@ -73,7 +75,9 @@ describe("TopContentList", () => {
     const images = Array.from(document.querySelectorAll("img"));
     expect(images).toHaveLength(2);
 
-    const taggedSrc = images.find((img) => img.getAttribute("src")?.includes(TAGGED_ITEM.itemId))?.getAttribute("src");
+    const taggedSrc = images
+      .find((img) => img.getAttribute("src")?.includes(TAGGED_ITEM.itemId))
+      ?.getAttribute("src");
     const untaggedSrc = images
       .find((img) => img.getAttribute("src")?.includes(UNTAGGED_ITEM.itemId))
       ?.getAttribute("src");

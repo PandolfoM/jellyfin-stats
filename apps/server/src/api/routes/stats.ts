@@ -1,11 +1,22 @@
 import { MAX_TOP_ITEMS as DB_MAX_TOP_ITEMS } from "@jfstats/db";
-import type { DateRange, LibraryStat, OverviewStats, SeriesPoint, TopItem, UserDetail, UserStat } from "@jfstats/db";
+import type {
+  DateRange,
+  LibraryStat,
+  OverviewStats,
+  SeriesPoint,
+  TopItem,
+  UserDetail,
+  UserStat,
+} from "@jfstats/db";
 import type { Context, Env, Hono, Schema } from "hono";
 
 export interface StatsDeps {
   getOverview(range: DateRange): Promise<OverviewStats>;
   getWatchTimeSeries(range: DateRange): Promise<SeriesPoint[]>;
-  getTopItems(range: DateRange, options: { limit: number; libraryId?: string; userId?: string }): Promise<TopItem[]>;
+  getTopItems(
+    range: DateRange,
+    options: { limit: number; libraryId?: string; userId?: string },
+  ): Promise<TopItem[]>;
   getUserStats(range: DateRange): Promise<UserStat[]>;
   getUserDetail(userId: string, range: DateRange): Promise<UserDetail | null>;
   getLibraryStats(range: DateRange): Promise<LibraryStat[]>;
@@ -81,8 +92,12 @@ export function parseRange(
  * threading in an already-chained app — auth's routes, here — keeps those
  * routes in the returned type instead of them being erased at this call.
  */
-export function registerStatsRoutes<E extends Env, S extends Schema>(app: Hono<E, S>, deps: StatsDeps) {
-  const withRange = <T>(handler: (range: DateRange, c: Context<E>) => Promise<T>) =>
+export function registerStatsRoutes<E extends Env, S extends Schema>(
+  app: Hono<E, S>,
+  deps: StatsDeps,
+) {
+  const withRange =
+    <T>(handler: (range: DateRange, c: Context<E>) => Promise<T>) =>
     async (c: Context<E>) => {
       let range: DateRange;
       try {
@@ -95,10 +110,22 @@ export function registerStatsRoutes<E extends Env, S extends Schema>(app: Hono<E
     };
 
   return app
-    .get("/api/stats/overview", withRange((range) => deps.getOverview(range)))
-    .get("/api/stats/series", withRange((range) => deps.getWatchTimeSeries(range)))
-    .get("/api/stats/users", withRange((range) => deps.getUserStats(range)))
-    .get("/api/stats/libraries", withRange((range) => deps.getLibraryStats(range)))
+    .get(
+      "/api/stats/overview",
+      withRange((range) => deps.getOverview(range)),
+    )
+    .get(
+      "/api/stats/series",
+      withRange((range) => deps.getWatchTimeSeries(range)),
+    )
+    .get(
+      "/api/stats/users",
+      withRange((range) => deps.getUserStats(range)),
+    )
+    .get(
+      "/api/stats/libraries",
+      withRange((range) => deps.getLibraryStats(range)),
+    )
     .get(
       "/api/stats/top-items",
       withRange((range, c) => {

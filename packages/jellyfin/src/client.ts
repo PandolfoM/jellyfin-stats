@@ -1,6 +1,11 @@
 import type { LiveSession } from "@jfstats/shared";
 import type { z } from "zod";
-import { authResponseSchema, clientIdentificationHeader, JellyfinAuthError, type JellyfinAuthResult } from "./auth.js";
+import {
+  authResponseSchema,
+  clientIdentificationHeader,
+  JellyfinAuthError,
+  type JellyfinAuthResult,
+} from "./auth.js";
 import {
   itemsSchema,
   librariesSchema,

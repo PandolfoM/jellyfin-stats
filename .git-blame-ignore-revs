@@ -1,0 +1,11 @@
+# Commits listed here are pure formatting — no logic changed — so `git blame`
+# should skip past them to the commit that actually wrote the line.
+#
+# GitHub reads this file automatically. Local git does not; each clone needs:
+#
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Only ever add a commit that is provably whitespace-only.
+
+# style: format the repo with prettier (printWidth 100, 78 files)
+11f20548560081c23ec042eab58566ae39eab519

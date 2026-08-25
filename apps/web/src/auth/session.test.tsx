@@ -39,11 +39,12 @@ function mockFetch(handler: (url: string, init?: RequestInit) => Response) {
 
 describe("SessionProvider", () => {
   it("resolves to authenticated when /api/auth/me returns a user", async () => {
-    mockFetch(() =>
-      new Response(JSON.stringify({ userId: "u-1", userName: "admin", isAdmin: true }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
+    mockFetch(
+      () =>
+        new Response(JSON.stringify({ userId: "u-1", userName: "admin", isAdmin: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
     );
 
     renderProbe();
@@ -183,11 +184,12 @@ describe("SessionProvider", () => {
     // resolution. A SessionProvider that only reacted to `resolveSession`
     // (and ignored the shared notifier) would leave `status` stuck on
     // "authenticated" here.
-    mockFetch(() =>
-      new Response(JSON.stringify({ userId: "u-1", userName: "admin", isAdmin: true }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
+    mockFetch(
+      () =>
+        new Response(JSON.stringify({ userId: "u-1", userName: "admin", isAdmin: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
     );
 
     renderProbe();

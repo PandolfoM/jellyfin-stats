@@ -44,7 +44,10 @@ function mockAuthenticated(): void {
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input instanceof Request ? input.url : input);
       if (url.includes("/api/auth/me")) {
-        return new Response(AUTHENTICATED_BODY, { status: 200, headers: { "content-type": "application/json" } });
+        return new Response(AUTHENTICATED_BODY, {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
       }
       throw new Error(`live.test.tsx did not expect a fetch to ${url}`);
     }),
@@ -102,7 +105,10 @@ describe("Live route", () => {
     source.dispatchEvent(new Event("error"));
 
     await waitFor(() =>
-      expect(screen.getByTestId("live-connection-status")).toHaveAttribute("data-connected", "false"),
+      expect(screen.getByTestId("live-connection-status")).toHaveAttribute(
+        "data-connected",
+        "false",
+      ),
     );
     expect(screen.getByTestId("live-connection-status")).toHaveTextContent("Disconnected");
     // The last-known session is still shown (not blanked) ...

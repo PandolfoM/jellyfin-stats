@@ -25,16 +25,56 @@ async function seed(db: Db): Promise<void> {
     { id: "user-b", name: "beta", isAdmin: false },
   ]);
   await db.insert(items).values([
-    { id: "item-1", name: "First Movie", type: "Movie", libraryId: "lib-movies", imageTag: "tag-1" },
+    {
+      id: "item-1",
+      name: "First Movie",
+      type: "Movie",
+      libraryId: "lib-movies",
+      imageTag: "tag-1",
+    },
     { id: "item-2", name: "Second Movie", type: "Movie", libraryId: "lib-movies" },
-    { id: "item-3", name: "An Episode", type: "Episode", libraryId: "lib-shows", seriesId: "series-1" },
+    {
+      id: "item-3",
+      name: "An Episode",
+      type: "Episode",
+      libraryId: "lib-shows",
+      seriesId: "series-1",
+    },
   ]);
   await db.insert(playbackRollupDaily).values([
-    { day: "2026-08-10", userId: "user-a", itemId: "item-1", libraryId: "lib-movies", playCount: 2, watchMs: 60_000 },
-    { day: "2026-08-10", userId: "user-b", itemId: "item-2", libraryId: "lib-movies", playCount: 1, watchMs: 30_000 },
-    { day: "2026-08-12", userId: "user-a", itemId: "item-3", libraryId: "lib-shows", playCount: 3, watchMs: 90_000 },
+    {
+      day: "2026-08-10",
+      userId: "user-a",
+      itemId: "item-1",
+      libraryId: "lib-movies",
+      playCount: 2,
+      watchMs: 60_000,
+    },
+    {
+      day: "2026-08-10",
+      userId: "user-b",
+      itemId: "item-2",
+      libraryId: "lib-movies",
+      playCount: 1,
+      watchMs: 30_000,
+    },
+    {
+      day: "2026-08-12",
+      userId: "user-a",
+      itemId: "item-3",
+      libraryId: "lib-shows",
+      playCount: 3,
+      watchMs: 90_000,
+    },
     // Outside every range used below.
-    { day: "2026-07-01", userId: "user-a", itemId: "item-1", libraryId: "lib-movies", playCount: 9, watchMs: 999_000 },
+    {
+      day: "2026-07-01",
+      userId: "user-a",
+      itemId: "item-1",
+      libraryId: "lib-movies",
+      playCount: 9,
+      watchMs: 999_000,
+    },
   ]);
 }
 
@@ -123,7 +163,13 @@ describe("getTopItems", () => {
 
       const top = await getTopItems(db, RANGE, { limit: 10 });
 
-      expect(top[0]).toMatchObject({ itemId: "item-3", name: "An Episode", type: "Episode", plays: 3, watchMs: 90_000 });
+      expect(top[0]).toMatchObject({
+        itemId: "item-3",
+        name: "An Episode",
+        type: "Episode",
+        plays: 3,
+        watchMs: 90_000,
+      });
       expect(top[1]).toMatchObject({ itemId: "item-1", name: "First Movie", watchMs: 60_000 });
       expect(top).toHaveLength(3);
     });
@@ -187,9 +233,30 @@ describe("getTopItems", () => {
         { id: "item-3", name: "Alpha", type: "Movie", libraryId: "lib-movies" },
       ]);
       await db.insert(playbackRollupDaily).values([
-        { day: "2026-08-10", userId: "user-a", itemId: "item-1", libraryId: "lib-movies", playCount: 1, watchMs: 5_000 },
-        { day: "2026-08-10", userId: "user-a", itemId: "item-2", libraryId: "lib-movies", playCount: 1, watchMs: 5_000 },
-        { day: "2026-08-10", userId: "user-a", itemId: "item-3", libraryId: "lib-movies", playCount: 1, watchMs: 5_000 },
+        {
+          day: "2026-08-10",
+          userId: "user-a",
+          itemId: "item-1",
+          libraryId: "lib-movies",
+          playCount: 1,
+          watchMs: 5_000,
+        },
+        {
+          day: "2026-08-10",
+          userId: "user-a",
+          itemId: "item-2",
+          libraryId: "lib-movies",
+          playCount: 1,
+          watchMs: 5_000,
+        },
+        {
+          day: "2026-08-10",
+          userId: "user-a",
+          itemId: "item-3",
+          libraryId: "lib-movies",
+          playCount: 1,
+          watchMs: 5_000,
+        },
       ]);
 
       const top = await getTopItems(db, RANGE, { limit: 10 });
@@ -259,9 +326,13 @@ describe("getTopItems", () => {
 const HUGE_WATCH_MS = "9007199254740993";
 
 async function seedHugeWatchTime(db: Db): Promise<void> {
-  await db.insert(libraries).values([{ id: "lib-movies", name: "Movies", collectionType: "movies" }]);
+  await db
+    .insert(libraries)
+    .values([{ id: "lib-movies", name: "Movies", collectionType: "movies" }]);
   await db.insert(jellyfinUsers).values([{ id: "user-a", name: "alpha", isAdmin: true }]);
-  await db.insert(items).values([{ id: "item-huge", name: "Huge Watch", type: "Movie", libraryId: "lib-movies" }]);
+  await db
+    .insert(items)
+    .values([{ id: "item-huge", name: "Huge Watch", type: "Movie", libraryId: "lib-movies" }]);
   await db.execute(sql`
     INSERT INTO ${playbackRollupDaily} (day, user_id, item_id, library_id, play_count, watch_ms)
     VALUES ('2026-08-10', 'user-a', 'item-huge', 'lib-movies', 1, ${HUGE_WATCH_MS}::bigint)
@@ -313,7 +384,12 @@ describe("getLibraryStats", () => {
       const stats = await getLibraryStats(db, { from: "2026-08-12", to: "2026-08-12" });
 
       expect(stats).toEqual([
-        expect.objectContaining({ libraryId: "lib-shows", name: "Shows", plays: 3, watchMs: 90_000 }),
+        expect.objectContaining({
+          libraryId: "lib-shows",
+          name: "Shows",
+          plays: 3,
+          watchMs: 90_000,
+        }),
         expect.objectContaining({ libraryId: "lib-movies", name: "Movies", plays: 0, watchMs: 0 }),
       ]);
     });

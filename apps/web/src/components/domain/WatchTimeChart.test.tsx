@@ -21,7 +21,17 @@ beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, "offsetWidth", { configurable: true, value: 600 });
   Object.defineProperty(HTMLElement.prototype, "offsetHeight", { configurable: true, value: 280 });
   HTMLElement.prototype.getBoundingClientRect = () =>
-    ({ width: 600, height: 280, top: 0, left: 0, right: 600, bottom: 280, x: 0, y: 0, toJSON() {} }) as DOMRect;
+    ({
+      width: 600,
+      height: 280,
+      top: 0,
+      left: 0,
+      right: 600,
+      bottom: 280,
+      x: 0,
+      y: 0,
+      toJSON() {},
+    }) as DOMRect;
 
   class MockResizeObserver implements ResizeObserver {
     readonly #callback: ResizeObserverCallback;
@@ -116,5 +126,9 @@ describe("WatchTimeChart", () => {
  * test failure on its own.
  */
 type AssertTrue<T extends true> = T;
-type _DayPointIsNotNarrowerThanSeriesPoint = AssertTrue<DayPoint extends SeriesResponse[number] ? true : false>;
-type _DayPointIsNotWiderThanSeriesPoint = AssertTrue<SeriesResponse[number] extends DayPoint ? true : false>;
+type _DayPointIsNotNarrowerThanSeriesPoint = AssertTrue<
+  DayPoint extends SeriesResponse[number] ? true : false
+>;
+type _DayPointIsNotWiderThanSeriesPoint = AssertTrue<
+  SeriesResponse[number] extends DayPoint ? true : false
+>;

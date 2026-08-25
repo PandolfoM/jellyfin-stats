@@ -35,7 +35,11 @@ describe("rollupWindow", () => {
   });
 
   it("puts both bounds exactly on UTC midnight whatever time it is called", () => {
-    for (const at of ["2026-08-17T00:00:00Z", "2026-08-17T12:34:56.789Z", "2026-08-17T23:59:59.999Z"]) {
+    for (const at of [
+      "2026-08-17T00:00:00Z",
+      "2026-08-17T12:34:56.789Z",
+      "2026-08-17T23:59:59.999Z",
+    ]) {
       const { from, to } = rollupWindow(new Date(at).getTime());
 
       // recomputeRollupRange floors `from` and ceils `to` to day boundaries. A `to`
@@ -96,9 +100,9 @@ describe("handle", () => {
     // A job name with no case arm must be surfaced as a rejection. Returning
     // undefined would have the scheduler record it as a successful run having
     // done nothing at all.
-    await expect(
-      handle({} as AppContext, "not-a-real-job" as JobName),
-    ).rejects.toThrow(/Unhandled job name/);
+    await expect(handle({} as AppContext, "not-a-real-job" as JobName)).rejects.toThrow(
+      /Unhandled job name/,
+    );
   });
 
   it("sweeps expired sessions and stale rate-limit rows on session-cleanup", async () => {
@@ -602,7 +606,9 @@ function runsWithDue(due: readonly JobName[]): Map<string, Date> {
 describe("runDueJobs fairness under a continuously-failing fast-retry job", () => {
   it("still starts another due job within JOB_NAMES.length ticks while session-poll fails on every attempt", async () => {
     const runJob = vi.fn((name: JobName) =>
-      name === "session-poll" ? Promise.reject(new Error("jellyfin unreachable")) : Promise.resolve(undefined),
+      name === "session-poll"
+        ? Promise.reject(new Error("jellyfin unreachable"))
+        : Promise.resolve(undefined),
     );
     const writeRun = vi.fn().mockResolvedValue(undefined);
     const logger = fakeLogger();
@@ -718,7 +724,9 @@ describe("startScheduler tick timing (finding 3)", () => {
     for (let tick = 0; tick < 6; tick += 1) {
       await vi.advanceTimersByTimeAsync(1000);
     }
-    const pollCallsAtSixTicks = runJob.mock.calls.filter(([name]) => name === "session-poll").length;
+    const pollCallsAtSixTicks = runJob.mock.calls.filter(
+      ([name]) => name === "session-poll",
+    ).length;
     // The 50ms offset baked into the first recorded run (at simulatedNow=1050)
     // pushes the nominal due point (1050 + 5000 = 6050) just past the 6th
     // tick's 6000ms mark -- still not due yet, one tick short.
@@ -727,7 +735,9 @@ describe("startScheduler tick timing (finding 3)", () => {
     await vi.advanceTimersByTimeAsync(1000); // 7th tick: 7000ms >= 6050ms -> due
     await scheduler.stop();
 
-    const pollCallsAtSevenTicks = runJob.mock.calls.filter(([name]) => name === "session-poll").length;
+    const pollCallsAtSevenTicks = runJob.mock.calls.filter(
+      ([name]) => name === "session-poll",
+    ).length;
     // Caught on the very next fast tick -- a ~1s delay past the nominal mark,
     // not the ~5s (a whole extra interval) the old tickMs === everyMs config
     // produced in the test above.

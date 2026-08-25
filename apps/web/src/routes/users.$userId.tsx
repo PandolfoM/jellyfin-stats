@@ -82,7 +82,10 @@ function UserDetailRoute() {
   if (notFound) {
     return (
       <div data-testid="user-detail-not-found" className="flex flex-col gap-6">
-        <EmptyState title="User not found" description="This user does not exist, or was removed from Jellyfin." />
+        <EmptyState
+          title="User not found"
+          description="This user does not exist, or was removed from Jellyfin."
+        />
       </div>
     );
   }
