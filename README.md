@@ -8,19 +8,21 @@ Jellyfin administrators sign in with their existing Jellyfin credentials.
 ## Status
 
 Complete: the data pipeline, the HTTP API, and the web UI are all built and packaged into
-one process. `docker compose up -d` brings up the whole stack — Postgres and the app,
-which applies its own schema migrations on boot, then syncs from Jellyfin on a schedule
-and serves both the API and the built web UI — from one command; see
-[Running the app](#running-the-app) for that flow and for the alternative two-terminal
+one process. `docker compose up -d` brings up the whole stack — Postgres (`jfstats-db`)
+and the app (`jfstats`), which applies its own schema migrations on boot, then syncs from
+Jellyfin on a schedule and serves both the API and the built web UI — from one command;
+see [Running the app](#running-the-app) for that flow and for the alternative two-terminal
 dev setup.
 
 ## Requirements
 
 - Docker and Docker Compose. In production (`docker compose up -d`) this runs everything:
   Postgres and the app, which applies migrations on startup, syncs from Jellyfin, and
-  serves the API and the built web UI on one port. For local development, Docker is
-  needed only for Postgres — the app and the Vite dev server run on the host instead;
-  see [Running the app](#running-the-app).
+  serves the API and the built web UI on one port. That stack pulls a prebuilt image from
+  GHCR rather than building from this checkout — see
+  [Deploying](#deploying-docker-compose-up--d). For local development,
+  `docker-compose.override.yml` builds from your working tree instead, and the Vite dev
+  server runs on the host; see [Running the app](#running-the-app).
 - Node 22+ and pnpm 10+ — required for local development (see above), and to run the
   one-off `seed`/`backfill` scripts against either setup.
 - A Jellyfin server and an API key (Jellyfin: Dashboard → API Keys)
@@ -29,34 +31,45 @@ dev setup.
 
 ```bash
 cp .env.example .env
-# Fill in JELLYFIN_URL, JELLYFIN_API_KEY, and POSTGRES_PASSWORD.
+# Fill in JELLYFIN_URL, JELLYFIN_API_KEY, and JFSTATS_DB_PASSWORD.
 ```
 
 `.env` is gitignored. Never commit real credentials.
 
-This section sets up a **development** database only — Postgres running under Docker.
-It does not start the app itself; that's [Running the app](#running-the-app), right
-after this. (Deploying instead of developing? Skip ahead to that section's
-`docker compose up -d`, which brings up Postgres and the app together, in containers, in
-one step — running it now, on top of the container below, would start two schedulers
-polling the same Jellyfin server into the same database.)
+### The two compose files
+
+| File                          | Purpose                                                                                 |
+| ----------------------------- | --------------------------------------------------------------------------------------- |
+| `docker-compose.yml`          | The deployment stack — app plus its database, self-contained. This is the one to share. |
+| `docker-compose.override.yml` | A development layer merged over it automatically. Delete it if you only want to deploy. |
+
+Compose merges both with no `-f` flags, so `docker compose up -d` in a checkout is a
+development run, while the same command with only the first file is a deployment. The
+override changes exactly three things: it builds the app from your working tree instead
+of pulling the published image, publishes Postgres on `127.0.0.1:15432` so host-side
+tooling can reach it, and points the database at a separate development volume so a local
+experiment can never touch a deployment's data on the same machine.
+
+That development volume is declared `external`, so create it once:
+
+```bash
+docker volume create jfstats-dev-db-data
+```
+
+Then bring the stack up:
 
 ```bash
 pnpm install
-docker compose up -d postgres
+docker compose up -d --build
 ```
 
 **Migrations run automatically at startup** — there is no separate migrate step. The
-first time anything connects (the dev server below, `docker compose up -d`, `seed`, or
-`backfill`) it applies whatever schema migrations haven't run yet and continues; there is
-nothing to run by hand first.
+first time anything connects (the container, the dev server below, `seed`, or `backfill`)
+it applies whatever schema migrations haven't run yet and continues.
 
-Compose publishes Postgres to `127.0.0.1:5432` on the host — loopback only, not the LAN —
-specifically so host-side tooling (the dev server below, `seed`, `backfill`, a local
-`psql`) can reach it; the containerized `app` service never uses this published port, it
-reaches Postgres over the compose network by service name instead. If port `5432` is
-already taken on your machine, change the host side of the `postgres` service's `ports:`
-mapping in `docker-compose.yml` and update `DATABASE_URL` in `.env` to match.
+Port `15432` is loopback only, never the LAN, and is deliberately not `5432` so it cannot
+collide with a Postgres already installed on your machine. `DATABASE_URL` in `.env` should
+match it; the container ignores that value and builds its own against the service name.
 
 To populate the database with 90 days of fake history instead of a live server:
 
@@ -111,8 +124,10 @@ session cleanup), and serves the HTTP API, in that order, every time it boots.
 
 ### Development (two terminals)
 
-Postgres runs under Docker (`docker compose up -d postgres`, per Setup above); the app
-and the web UI's Vite dev server both run on the host, in two separate terminals:
+Postgres runs under Docker (`docker compose up -d jfstats-db`, per Setup above); the app
+and the web UI's Vite dev server both run on the host, in two separate terminals. Stop the
+`jfstats` container first if it is running, or two schedulers will poll the same Jellyfin
+server into the same database:
 
 ```bash
 # terminal 1 — the app: HTTP API + scheduler, listening on PORT (default 3000)
@@ -134,47 +149,64 @@ real Jellyfin server — its scheduler polls sessions every `SESSION_POLL_INTERV
 `pnpm --filter @jfstats/server seed` once instead for 90 days of fake history (see
 Setup, above).
 
-### Production (`docker compose up -d`)
+### Deploying (`docker compose up -d`)
+
+`docker-compose.yml` is self-contained and portable — it assumes nothing about the machine
+it lands on. Copy it and `.env.example` to a server, fill in three values, and start:
 
 ```bash
 cp .env.example .env
-# Fill in JELLYFIN_URL, JELLYFIN_API_KEY, and POSTGRES_PASSWORD.
+```
+
+```bash
 docker compose up -d
 ```
 
-This builds and runs everything from the one `Dockerfile`, as exactly two services:
-`postgres`, and `app` — one process that applies migrations on boot (no separate
-migrate step, no `migrate:push` needed) and then serves the API and the built web UI, so
-the whole dashboard is one origin, `http://localhost:3000` by default. Set `PORT` in
-`.env` to change it: `docker-compose.yml` passes that value straight through to the
-container's own listener and publishes that same port on the host, so the two always
-agree. There is no separate web server or build step to run by hand; `docker compose
-build` produces the SPA as part of the app image.
+`JELLYFIN_URL`, `JELLYFIN_API_KEY`, and `JFSTATS_DB_PASSWORD` are the only required
+values; every other setting has a working default. Delete `docker-compose.override.yml`
+if you copied the whole repository — it is a development layer, and Compose would merge it
+automatically and try to build from source.
 
-**Run exactly one `app` instance.** It runs the startup migration and the in-process
-scheduler, and neither is safe to run twice against the same database: a second
-scheduler would double-poll Jellyfin, and two concurrent `migrate()` calls could race
-the same schema. `docker-compose.yml`'s fixed host-port mapping already blocks
-`docker compose up -d --scale app=2` on a single host, but that is incidental, not a
+This runs two services: `jfstats-db` (Postgres 17) and `jfstats` — one process that
+applies migrations on boot, then serves the API and the built web UI, so the whole
+dashboard is one origin on `http://localhost:3000`. Set `JFSTATS_PORT` if that port is
+taken; the container always listens on 3000 internally. There is no separate web server or
+build step.
+
+The image is **pulled from GHCR** — `ghcr.io/pandolfom/jellyfin-stats:latest`, published by
+`.github/workflows/publish.yml` on every push to `main`. So a deployment tracks `main`, not
+your working tree; update with `docker compose pull && docker compose up -d`.
+
+**`JELLYFIN_URL` must be reachable from inside a container.** `http://localhost:8096` never
+works — inside a container `localhost` is the container itself, not your host. Use a LAN IP
+or a real hostname, or `host.docker.internal` on Docker Desktop (unavailable on plain Linux
+Docker Engine without extra configuration). If Jellyfin runs in Docker on the same machine
+and you would rather keep the traffic internal than send it out to a reverse proxy and
+back, add this app's two services to Jellyfin's own compose file and use the bare service
+name `http://jellyfin:8096` — that is how the author's own deployment is set up.
+
+**Run exactly one `jfstats` instance.** It runs the startup migration and the in-process
+scheduler, and neither is safe to run twice against the same database: a second scheduler
+would double-poll Jellyfin, and two concurrent `migrate()` calls could race the same
+schema. The fixed `container_name` and host-port mapping already block
+`docker compose up -d --scale jfstats=2` on a single host, but that is incidental, not a
 guarantee — it does not hold under Swarm or behind a reverse proxy where two instances
 could run without a port clash. Don't scale this service.
 
-**`JELLYFIN_URL` must be reachable from inside a container, not just from your
-host.** A common setup runs Jellyfin on the same machine as this stack, with
-`.env` pointing `JELLYFIN_URL` at something like `http://localhost:8096` — that
-works for the host-side dev flow above, but breaks under `docker compose up -d`:
-inside a container, `localhost` means the container itself, not the host machine,
-so the app can never reach Jellyfin. Unlike `DATABASE_URL` (which `docker-compose.yml`
-already repoints at the `postgres` service on the compose network), `docker-compose.yml`
-cannot fix this one for you, because Jellyfin is not a compose service it manages. Point
-`JELLYFIN_URL` at something a container can actually reach: your machine's LAN IP or a
-real hostname, or `host.docker.internal` if you're on Docker Desktop (Docker Desktop
-resolves it to the host automatically; it is not available on plain Linux Docker Engine
-without extra configuration).
+**Turn on `COOKIE_SECURE` and `TRUST_PROXY_HEADERS` only behind an HTTPS reverse proxy.** A
+`Secure` cookie over plain HTTP is silently dropped by the browser, which looks exactly like
+a broken login; trusting `X-Forwarded-For` without a proxy that overwrites it lets any
+client forge a fresh rate-limit identity on every request.
+
+**Only the variables named in the `jfstats` service's `environment:` block reach the app.**
+There is no `env_file: .env` — Compose reads `.env` solely to expand `${...}` references.
+`FALLBACK_ADMIN_USER` and `FALLBACK_ADMIN_PASSWORD` are deliberately not wired up, because
+an empty value is not the same as an unset one and an empty one fails validation at
+startup; add both to that block by hand if you need the recovery path.
 
 ### Confirming the scheduler is actually running
 
-There is deliberately very little in `docker compose logs app` once startup finishes —
+There is deliberately very little in `docker compose logs jfstats` once startup finishes —
 by design, a healthy poll cycle logs nothing. After `migrations applied`, `startup
 reconciliation complete`, and `listening`, the logs go quiet even while the app is
 correctly polling Jellyfin every `SESSION_POLL_INTERVAL_MS` — that quiet is expected,
@@ -187,13 +219,13 @@ not a hang. Two ways to actually confirm it's alive:
   on every successful run:
 
   ```bash
-  docker compose exec postgres psql -U jfstats -d jfstats \
+  docker compose exec jfstats-db psql -U jfstats -d jfstats \
     -c "select name, last_run_at from job_runs order by name;"
   ```
 
   Run it twice a few seconds apart; `session-poll`'s `last_run_at` should have moved
   forward by roughly `SESSION_POLL_INTERVAL_MS` each time. A scheduled job only logs on
-  _failure_ (`"scheduled job failed"`), so silence in `docker compose logs app` between
+  _failure_ (`"scheduled job failed"`), so silence in `docker compose logs jfstats` between
   the three startup lines is the healthy case, not a symptom.
 
 ## Configuration
@@ -209,27 +241,32 @@ not a hang. Two ways to actually confirm it's alive:
 | `REFERENCE_SYNC_INTERVAL_MS` | `900000`                   | How often users and libraries refresh                                                                                                                           |
 | `COMPLETION_THRESHOLD`       | `0.9`                      | Fraction of runtime that counts as watched                                                                                                                      |
 | `LOG_LEVEL`                  | `info`                     | `debug`, `info`, `warn`, or `error`                                                                                                                             |
-| `PORT`                       | `3000`                     | Port the HTTP API listens on                                                                                                                                    |
+| `PORT`                       | `3000`                     | Port the HTTP API listens on. Host-side only — under compose the container always listens on 3000; use `JFSTATS_PORT` to move the published host port           |
+| `JFSTATS_PORT`               | `3000`                     | Compose only: host port the dashboard is published on                                                                                                           |
 | `COOKIE_SECURE`              | `false`                    | Marks the session cookie `Secure`; see [Running the API](#running-the-api)                                                                                      |
 | `SESSION_TTL_HOURS`          | `168`                      | Session lifetime (sliding); see [Running the API](#running-the-api)                                                                                             |
 | `TRUST_PROXY_HEADERS`        | `false`                    | Trust `X-Forwarded-For` for rate limiting; see [Running the API](#running-the-api)                                                                              |
 | `TZ`                         | unset (container runs UTC) | IANA timezone (e.g. `America/New_York`) the three nightly maintenance jobs are scheduled against; see the note below                                            |
+
+Under `docker compose up -d`, only the variables named in the `jfstats` service's
+`environment:` block are passed to the container — see
+[Deploying](#deploying-docker-compose-up--d). The rest of this table applies to the
+host-side dev flow, or to compose once you add the variable to that block.
 
 **Nothing sets `TZ` for you.** `item-sync`, `rollup-recompute`, and `session-cleanup` run
 at 03:00/03:30/04:00 in whatever timezone the process sees, chosen to land during quiet
 viewing hours rather than peak ones (see `apps/server/src/sync/schedule.ts`). Leave `TZ`
 unset and that "local time" is UTC — `node:22-alpine` has no other default — so the jobs
 land at 03:00/03:30/04:00 UTC, which is peak evening viewing across most of the Americas.
-Set `TZ` in `.env` to your own IANA timezone name to actually get quiet-hours scheduling;
-under `docker compose up -d`, `env_file: .env` already passes it through to the container
-with no other change needed. (`SESSION_POLL_INTERVAL_MS` and `REFERENCE_SYNC_INTERVAL_MS`,
+Set `TZ` to your own IANA timezone name to actually get quiet-hours scheduling. It is read
+from `.env` on both paths — the compose file passes it through as `${TZ:-UTC}`. (`SESSION_POLL_INTERVAL_MS` and `REFERENCE_SYNC_INTERVAL_MS`,
 the two interval-based jobs, are unaffected either way — only the three daily jobs read
 local time.)
 
 ## API
 
 The HTTP API is a Hono app served by the same process as everything else —
-`pnpm --filter @jfstats/server dev` in development, or the `app` service under
+`pnpm --filter @jfstats/server dev` in development, or the `jfstats` service under
 `docker compose up -d` in production — listening on `PORT` (default `3000`).
 
 ### Authentication

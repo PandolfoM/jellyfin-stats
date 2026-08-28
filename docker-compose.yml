@@ -1,65 +1,90 @@
+# Deployment stack. Self-contained: the app, its database, and nothing that
+# assumes anything about the machine it lands on.
+#
+#   cp .env.example .env    # set JELLYFIN_URL, JELLYFIN_API_KEY, JFSTATS_DB_PASSWORD
+#   docker compose up -d
+#
+# The dashboard is then on http://localhost:3000 (change with JFSTATS_PORT).
+# Updating is `docker compose pull && docker compose up -d` — the image is
+# published from this repository's main branch, so there is nothing to build.
+#
+# Developing rather than deploying? docker-compose.override.yml sits on top of
+# this file and is picked up automatically, swapping the published image for a
+# build of your working tree. Delete it if you only want to deploy.
 services:
-  postgres:
+  jfstats-db:
     image: postgres:17-alpine
+    container_name: jfstats-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: jfstats
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: jfstats
-    ports:
-      # Bound to loopback only, not 0.0.0.0: this exists so a host-side
-      # process (the dev server run via `pnpm --filter @jfstats/server dev`,
-      # `seed`, `backfill`, or a local `psql`) can reach Postgres — the `app`
-      # container never uses this, it reaches Postgres over the compose
-      # network by service name (see DATABASE_URL below). Loopback-only means
-      # this does not additionally expose Postgres to the LAN the way the
-      # `app` service's published port intentionally does.
-      - "127.0.0.1:5432:5432"
+      POSTGRES_PASSWORD: ${JFSTATS_DB_PASSWORD:?JFSTATS_DB_PASSWORD is required}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - jfstats-db-data:/var/lib/postgresql/data
+    # No published port. The app reaches this over the compose network by
+    # service name; exposing Postgres to the host is a needless attack surface
+    # in a deployment. Host-side tooling is a development concern — see
+    # docker-compose.override.yml, which publishes it on loopback.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U jfstats -d jfstats"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  app:
-    build: .
+  jfstats:
+    image: ghcr.io/pandolfom/jellyfin-stats:latest
+    container_name: jfstats
     restart: unless-stopped
-    # Exactly one replica: it runs the startup migration and the in-process
-    # scheduler, and neither is safe to run twice against the same database —
-    # a second scheduler would double-poll Jellyfin, and two `migrate()` calls
-    # at once could race the same schema. The fixed host port below already
-    # rejects `docker compose up -d --scale app=2` on this single host, but
-    # that is incidental, not the guarantee: it does not hold under Swarm or a
-    # reverse-proxy topology where two instances could run without a port
-    # clash. Do not scale this service.
-    env_file: .env
+    # Do not scale this service. It runs the startup migration and the
+    # in-process poller; a second replica would double-poll Jellyfin and two
+    # migrations could race the same schema.
     environment:
-      # The container reaches Postgres by service name over the compose
-      # network; .env's DATABASE_URL is the host-facing value used by `tsx`
-      # run directly on the host, and would send the container to its own
-      # loopback interface.
-      DATABASE_URL: postgres://jfstats:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/jfstats
+      # Must be reachable FROM INSIDE THIS CONTAINER. "localhost" will not work
+      # — inside a container that is the container itself, not your host. Use a
+      # LAN IP or hostname; host.docker.internal on Docker Desktop; or, if
+      # Jellyfin is a service in this same compose project, its service name.
+      JELLYFIN_URL: ${JELLYFIN_URL:?JELLYFIN_URL is required}
+      JELLYFIN_API_KEY: ${JELLYFIN_API_KEY:?JELLYFIN_API_KEY is required}
+      # Built here rather than taken from .env so the host part is always the
+      # service name: a .env DATABASE_URL is host-facing and would point the
+      # container at itself.
+      DATABASE_URL: postgres://jfstats:${JFSTATS_DB_PASSWORD:?JFSTATS_DB_PASSWORD is required}@jfstats-db:5432/jfstats
+      # The three nightly maintenance jobs run at 03:00/03:30/04:00 in THIS
+      # timezone, chosen to land in quiet viewing hours. Left as UTC they fire
+      # during peak evening viewing across the Americas — set TZ to your own
+      # IANA name (e.g. America/New_York).
+      TZ: ${TZ:-UTC}
+      # Turn both on only behind an HTTPS reverse proxy. COOKIE_SECURE on plain
+      # HTTP means the browser silently drops the session cookie, which looks
+      # exactly like a broken login; TRUST_PROXY_HEADERS without a proxy that
+      # overwrites X-Forwarded-For lets any client forge a fresh rate-limit
+      # identity on every request.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Optional emergency admin, for when Jellyfin itself is down: add
+      # FALLBACK_ADMIN_USER and FALLBACK_ADMIN_PASSWORD here (both, or neither).
+      # Deliberately not wired to .env — an empty value is not the same as an
+      # unset one, and an empty one fails validation at startup.
     ports:
-      # Both sides use the same value: PORT is what the process binds to
-      # (packages/shared/src/env.ts), not a host-only knob, so hardcoding the
-      # container side would let the published port dial a container that is
-      # not listening on it.
-      - "${PORT:-3000}:${PORT:-3000}"
+      # Container side is fixed: the image listens on 3000. Change the host side
+      # with JFSTATS_PORT if that is taken.
+      - "${JFSTATS_PORT:-3000}:3000"
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "wget --no-verbose --tries=1 --spider http://localhost:${PORT:-3000}/api/health || exit 1",
+          "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1",
         ]
+      # Generous: the first boot applies migrations before it listens.
       start_period: 30s
       interval: 15s
       timeout: 3s
       retries: 3
     depends_on:
-      postgres:
+      jfstats-db:
         condition: service_healthy
 
 volumes:
-  postgres-data:
+  jfstats-db-data:

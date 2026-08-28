@@ -1,0 +1,51 @@
+# Development layer. Compose merges this over docker-compose.yml automatically
+# whenever you run `docker compose` in this directory — no -f flags needed:
+#
+#   docker compose up -d --build
+#
+# It changes three things about the deployment stack and nothing else:
+#
+#   1. The app is built from your working tree instead of pulled from GHCR.
+#      This is the whole point — the published image is built from main and
+#      contains none of your uncommitted work.
+#   2. Postgres is published on loopback, so host-side tooling (`pnpm dev`,
+#      `seed`, `backfill`, a GUI client) can reach the same database the
+#      container uses.
+#   3. The database volume points at a separate development volume, so a local
+#      experiment can never touch a deployment's data on the same machine.
+#
+# Anyone who only wants to deploy should delete this file; docker-compose.yml
+# stands alone.
+services:
+  jfstats-db:
+    # Renamed so this can coexist with a real deployment on the same host
+    # rather than colliding on the container name.
+    container_name: jfstats-dev-db
+    ports:
+      # Loopback only, never the LAN. 15432 rather than 5432 to stay clear of
+      # any Postgres already installed on the host — .env's host-facing
+      # DATABASE_URL should match whatever is chosen here.
+      - "127.0.0.1:15432:5432"
+
+  jfstats:
+    # `build` wins over the inherited `image:` as the source. The tag is
+    # overridden too, so a local build never shadows the published image's name
+    # in this machine's image store.
+    build: .
+    image: jellyfin-stats:local
+    container_name: jfstats-local
+    # Everything else — JELLYFIN_URL, JELLYFIN_API_KEY, DATABASE_URL, TZ — is
+    # inherited from the base file, which already reads them from .env. Add
+    # overrides here only where development genuinely differs, e.g.:
+    # environment:
+    #   LOG_LEVEL: debug
+
+volumes:
+  # Redirects the base file's `jfstats-db-data` mount to a different, external
+  # volume without touching the service definition. External because it is
+  # expected to already hold data — typically a pg_dump restored from a real
+  # deployment. Compose will not create it; if it is missing, create and
+  # populate it first, or drop the `external: true` line to start empty.
+  jfstats-db-data:
+    external: true
+    name: jfstats-dev-db-data
