@@ -174,8 +174,29 @@ taken; the container always listens on 3000 internally. There is no separate web
 build step.
 
 The image is **pulled from GHCR** — `ghcr.io/pandolfom/jellyfin-stats:latest`, published by
-`.github/workflows/publish.yml` on every push to `main`. So a deployment tracks `main`, not
-your working tree; update with `docker compose pull && docker compose up -d`.
+`.github/workflows/publish.yml`. So a deployment tracks a branch, not your working tree;
+update with `docker compose pull && docker compose up -d`.
+
+Which tag to point `docker-compose.yml` at:
+
+| Tag           | Published from              | Use it for                                                       |
+| ------------- | --------------------------- | ---------------------------------------------------------------- |
+| `latest`      | every push to `main`        | the normal deployment                                            |
+| `rc`          | every push to `develop`     | trying unreleased work; expect it to move and occasionally break |
+| `X.Y.Z`       | a `vX.Y.Z` git tag          | pinning a release                                                |
+| `X.Y.Z-rc.N`  | a `vX.Y.Z-rc.N` git tag     | pinning a specific candidate                                     |
+| `X.Y`, `X`    | a `vX.Y.Z` git tag **only** | staying on a release line                                        |
+| `sha-<short>` | every branch push           | rolling back to one exact build                                  |
+
+**A release candidate never moves a stable tag.** `vX.Y.Z-rc.N` publishes only its own full
+version — never `X.Y`, never `X`, never `latest` — so a candidate cannot reach anyone pinned
+to a release line. That is enforced by `enable=` guards in the workflow rather than by
+convention; the comment above the tag list explains why they are needed.
+
+An `rc` deployment applies migrations on boot exactly as `latest` does, and **migrations are
+not reversible by rolling the image back**. Pulling `rc`, letting it migrate, then returning
+to `latest` leaves a database whose schema is ahead of the running code. Take a backup first
+(`docker exec jfstats-db pg_dump -U jfstats -d jfstats > backup.sql`) if the data matters.
 
 **`JELLYFIN_URL` must be reachable from inside a container.** `http://localhost:8096` never
 works — inside a container `localhost` is the container itself, not your host. Use a LAN IP

@@ -1,11 +1,12 @@
 name: Publish image
 
-# Runs on every push to main (rolling `latest`) and on version tags like
-# v1.2.3 (an immutable, pinnable tag) — never on pull requests, so a PR from
-# an untrusted fork can't push to the registry using this repo's permissions.
+# Runs on every push to main (rolling `latest`), every push to develop (rolling
+# `rc`), and on version tags like v1.2.3 or v1.2.3-rc.1 (immutable, pinnable) —
+# never on pull requests, so a PR from an untrusted fork can't push to the
+# registry using this repo's permissions.
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     tags: ["v*"]
 
 # Least privilege: this workflow only ever needs to write packages and read
@@ -34,18 +35,33 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # main -> `latest` (+ the short commit sha, for rollback);
-      # a `vX.Y.Z` tag -> `X.Y.Z`, `X.Y`, and `X` — the pinnable tags.
+      # main            -> `latest`
+      # develop         -> `rc`
+      # any of the two  -> `sha-<short>`, for rollback and for pinning a build
+      # `vX.Y.Z`        -> `X.Y.Z`, `X.Y`, `X`
+      # `vX.Y.Z-rc.N`   -> `X.Y.Z-rc.N` ONLY
+      #
+      # That last line is the one worth reading twice. metadata-action does not
+      # treat a prerelease specially for the `{{major}}.{{minor}}` and
+      # `{{major}}` patterns, so `v1.3.0-rc.1` would otherwise publish `1.3` and
+      # `1` — handing an untested release candidate to everyone pinned to a
+      # stable moving tag. The `enable=` guards below restrict those two to tags
+      # with no prerelease suffix. `{{version}}` keeps the full `1.3.0-rc.1`,
+      # which is exactly what a candidate should be pinnable as.
+      #
+      # `latest` needs no such guard: it is gated on the default branch, and a
+      # tag push is not a branch push, so it never applies to a version tag.
       - uses: docker/metadata-action@v5
         id: meta
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,format=short,enable={{is_default_branch}}
+            type=raw,value=rc,enable=${{ github.ref == 'refs/heads/develop' }}
+            type=sha,format=short,enable=${{ github.ref_type == 'branch' }}
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref_name, '-') }}
+            type=semver,pattern={{major}},enable=${{ !contains(github.ref_name, '-') }}
 
       - uses: docker/build-push-action@v6
         with:
