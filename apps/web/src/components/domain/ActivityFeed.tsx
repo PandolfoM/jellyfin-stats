@@ -1,5 +1,5 @@
 import type { HistoryResponse } from "../../api/queries";
-import { formatDay, formatDuration } from "../../lib/format";
+import { formatDateTime, formatDuration, formatEpisodeLabel } from "../../lib/format";
 import { Badge } from "../ui/badge";
 import { Skeleton } from "../ui/skeleton";
 import { EmptyState } from "./EmptyState";
@@ -25,10 +25,17 @@ const SKELETON_ROW_COUNT = 5;
  * produced `rows` — so a future route (a per-user or per-library activity
  * panel) can reuse it exactly like `TopContentList`.
  *
- * `row.startedAt` arrives as a full ISO timestamp (JSON has no `Date` type),
- * not the plain `YYYY-MM-DD` day `formatDay` expects — sliced to the first
- * 10 characters before formatting, which is a UTC calendar day regardless of
- * the time-of-day portion that follows it.
+ * `row.startedAt` arrives as a full ISO timestamp (JSON has no `Date` type)
+ * and is rendered whole, date and time, by `formatDateTime` — in the reader's
+ * local timezone, since the only useful answer to "when did this play" is a
+ * wall-clock one. See that function for why it is the mirror image of
+ * `formatDay`, which must *not* convert.
+ *
+ * An episode's series and S/E numbering join the muted meta line rather than
+ * getting a line of their own the way `PlaybackHistoryTable` gives them one.
+ * This is a compact feed in a dashboard card, and a third line per row would
+ * cost more than it returns; the series leads that line so it survives the
+ * truncation the long ones get.
  */
 export function ActivityFeed({ rows, loading }: ActivityFeedProps) {
   if (loading) {
@@ -57,7 +64,9 @@ export function ActivityFeed({ rows, loading }: ActivityFeedProps) {
           <div className="flex min-w-0 flex-col">
             <span className="truncate font-medium text-foreground">{row.itemName}</span>
             <span className="truncate text-xs text-muted-foreground">
-              {row.userName} · {formatDay(row.startedAt.slice(0, 10))}
+              {[formatEpisodeLabel(row), row.userName, formatDateTime(row.startedAt)]
+                .filter((part) => part !== null)
+                .join(" · ")}
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-2">

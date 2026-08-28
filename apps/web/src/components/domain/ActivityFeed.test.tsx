@@ -90,3 +90,32 @@ describe("ActivityFeed", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
+
+describe("ActivityFeed episode context and timestamp", () => {
+  it("puts the series and S/E numbering on the episode row's meta line", () => {
+    render(<ActivityFeed rows={ROWS} loading={false} />);
+
+    // ROWS[1] is the Episode fixture: The Bear-style series/season/episode.
+    // Series leads so it survives truncation on a narrow card.
+    const meta = screen.getByText(/Example Show · S2E5/);
+    expect(meta).toHaveTextContent("grace");
+  });
+
+  it("leaves a movie's meta line without an episode prefix", () => {
+    render(<ActivityFeed rows={ROWS} loading={false} />);
+
+    // ROWS[0] is the Movie fixture — it must not gain a stray separator or an
+    // empty leading segment from the join.
+    const meta = screen.getByText(/^ada · /);
+    expect(meta.textContent?.startsWith("ada")).toBe(true);
+  });
+
+  it("shows the time of day alongside the date", () => {
+    render(<ActivityFeed rows={ROWS} loading={false} />);
+
+    // Shape, not exact values: the timestamp renders in the reader's local
+    // timezone. `formatDateTime`'s own tests pin a zone and assert the values.
+    const meta = screen.getByText(/^ada · /);
+    expect(meta.textContent).toMatch(/\d{1,2} \w{3}, \d{2}:\d{2}$/);
+  });
+});
