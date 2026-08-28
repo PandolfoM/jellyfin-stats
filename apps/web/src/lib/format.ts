@@ -67,3 +67,30 @@ export function formatEpisodeLabel({
 
   return parts.length === 0 ? null : parts.join(" · ");
 }
+
+/**
+ * A full ISO timestamp as a date and a 24-hour clock time, e.g.
+ * `"1 Jan, 20:15"`. Used by the history table's Started column, where the day
+ * alone left two sessions hours apart looking identical.
+ *
+ * Rendered in the **viewer's local timezone**, which is the opposite of what
+ * `formatDay` above does — and deliberately so. `formatDay` takes a
+ * `YYYY-MM-DD` bucket label that is already a UTC calendar day and must not be
+ * shifted by an hour of local offset; this takes an instant, and the only
+ * useful answer to "when did this play" is the wall-clock time where the
+ * person reading it lives.
+ *
+ * One consequence worth knowing: the history range filter selects by UTC day,
+ * so a session near midnight UTC can render with a local date just outside the
+ * range that fetched it. That is correct on both counts rather than a bug — the
+ * row really did fall in the requested UTC day, and it really did play at the
+ * local time shown.
+ */
+export function formatDateTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${date.getDate()} ${MONTHS[date.getMonth()] ?? "?"}, ${hours}:${minutes}`;
+}

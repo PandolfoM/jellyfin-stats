@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   formatCount,
+  formatDateTime,
   formatDay,
   formatDuration,
   formatEpisodeLabel,
@@ -128,5 +129,64 @@ describe("formatEpisodeLabel", () => {
     expect(
       formatEpisodeLabel({ seriesName: "", seasonNumber: null, episodeNumber: null }),
     ).toBeNull();
+  });
+});
+
+describe("formatDateTime", () => {
+  // Pinned so the assertions below are about the formatter, not about wherever
+  // the suite happens to run. UTC+0 keeps the expected strings readable; the
+  // local-offset behaviour gets its own test underneath.
+  beforeAll(() => {
+    vi.stubEnv("TZ", "UTC");
+  });
+
+  afterAll(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("renders the date and a 24-hour clock time", () => {
+    expect(formatDateTime("2026-01-01T20:15:00.000Z")).toBe("1 Jan, 20:15");
+  });
+
+  it("zero-pads the time so the column stays aligned", () => {
+    expect(formatDateTime("2026-03-09T04:05:00.000Z")).toBe("9 Mar, 04:05");
+  });
+
+  it("distinguishes two sessions on the same day", () => {
+    // The whole point of the change: the previous formatter rendered both of
+    // these as "1 Jan" and made a busy day look like one long session.
+    expect(formatDateTime("2026-01-01T09:00:00.000Z")).not.toBe(
+      formatDateTime("2026-01-01T21:30:00.000Z"),
+    );
+  });
+
+  it("returns a placeholder rather than 'Invalid Date' for an unparseable value", () => {
+    expect(formatDateTime("not-a-timestamp")).toBe("—");
+  });
+});
+
+describe("formatDateTime in a non-UTC timezone", () => {
+  // The behaviour that distinguishes this from `formatDay`: an instant is
+  // converted to the reader's wall clock, not printed in UTC. Pinned to a
+  // negative offset because that is the direction that also rolls the *date*
+  // back a day, which is the case most likely to be got wrong.
+  beforeAll(() => {
+    vi.stubEnv("TZ", "America/New_York");
+  });
+
+  afterAll(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("renders the local wall-clock time, not the UTC time", () => {
+    // 20:15 UTC is 15:15 EST on this date.
+    expect(formatDateTime("2026-01-01T20:15:00.000Z")).toBe("1 Jan, 15:15");
+  });
+
+  it("rolls the date back when the local offset crosses midnight", () => {
+    // 02:30 UTC on 2 Jan is still 21:30 on 1 Jan in New York. Printing the UTC
+    // date beside a local time would show "2 Jan, 21:30" — a timestamp that
+    // never existed.
+    expect(formatDateTime("2026-01-02T02:30:00.000Z")).toBe("1 Jan, 21:30");
   });
 });

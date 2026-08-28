@@ -245,6 +245,37 @@ describe("PlaybackHistoryTable rendering", () => {
   });
 });
 
+describe("PlaybackHistoryTable started column", () => {
+  it("shows the time of day, not just the date", () => {
+    // Two sessions on the same day have to be distinguishable in the column;
+    // rendering the date alone made a whole evening look like one entry.
+    render(
+      <PlaybackHistoryTable
+        rows={[
+          makeRow(0, { id: "row-morning", startedAt: "2026-01-01T09:05:00.000Z" }),
+          makeRow(1, { id: "row-evening", startedAt: "2026-01-01T21:30:00.000Z" }),
+        ]}
+        total={2}
+        page={1}
+        pageSize={PAGE_SIZE}
+        onPageChange={() => {}}
+        loading={false}
+      />,
+    );
+
+    const cells = screen
+      .getAllByTestId("playback-history-row")
+      .map((row) => row.querySelector("td")?.textContent ?? "");
+
+    // Asserted as a shape rather than exact strings: the column renders in the
+    // reader's local timezone, so the literal hours depend on where the suite
+    // runs. `formatDateTime`'s own tests pin a timezone and check the values.
+    expect(cells[0]).toMatch(/^\d{1,2} \w{3}, \d{2}:\d{2}$/);
+    expect(cells[1]).toMatch(/^\d{1,2} \w{3}, \d{2}:\d{2}$/);
+    expect(cells[0]).not.toBe(cells[1]);
+  });
+});
+
 describe("PlaybackHistoryTable episode context", () => {
   // "Fishes" or "Chapter 4" is unidentifiable on its own in a history that
   // mixes shows together, so an episode row has to carry its series and its

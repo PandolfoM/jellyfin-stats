@@ -1,5 +1,5 @@
 import type { HistoryResponse } from "../../api/queries";
-import { formatCount, formatDay, formatDuration, formatEpisodeLabel } from "../../lib/format";
+import { formatCount, formatDateTime, formatDuration, formatEpisodeLabel } from "../../lib/format";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
@@ -108,8 +108,8 @@ export function PlaybackHistoryTable({
 
             return (
               <TableRow key={row.id} data-testid="playback-history-row" data-row-id={row.id}>
-                <TableCell className="text-muted-foreground">
-                  {formatDay(row.startedAt.slice(0, 10))}
+                <TableCell className="text-muted-foreground whitespace-nowrap tabular-nums">
+                  {formatDateTime(row.startedAt)}
                 </TableCell>
                 <TableCell className="max-w-64">
                   {/*
