@@ -59,9 +59,15 @@ export function ActivityFeed({ rows, loading }: ActivityFeedProps) {
 
   return (
     <ul className="flex flex-col gap-3">
+      {/* Rows wrap on a phone rather than forcing three columns into 375px,
+          where the item name would be squeezed to a few characters. The
+          three-column grid returns at sm. */}
       {rows.map((row) => (
-        <li key={row.id} className="grid grid-cols-3 gap-3 text-sm">
-          <div className="flex min-w-0 flex-col">
+        <li
+          key={row.id}
+          className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm sm:grid sm:grid-cols-3"
+        >
+          <div className="flex min-w-0 flex-1 flex-col sm:flex-none">
             <span className="truncate font-medium text-foreground">{row.itemName}</span>
             <span className="truncate text-xs text-muted-foreground">
               {[formatEpisodeLabel(row), formatDateTime(row.startedAt)]
@@ -69,10 +75,10 @@ export function ActivityFeed({ rows, loading }: ActivityFeedProps) {
                 .join(" · ")}
             </span>
           </div>
-          <div className="flex items-center gap-2 justify-self-center">
+          <div className="flex shrink-0 items-center gap-2 sm:justify-self-center">
             <span className="text-muted-foreground">{row.userName}</span>
           </div>
-          <div className="flex shrink-0 items-center gap-2 justify-self-end">
+          <div className="flex shrink-0 items-center gap-2 sm:justify-self-end">
             <Badge variant="secondary">{row.itemType}</Badge>
             <span className="text-muted-foreground">{formatDuration(row.watchMs)}</span>
           </div>

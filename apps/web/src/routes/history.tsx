@@ -129,7 +129,7 @@ function HistoryRoute() {
             `<span>` and the trigger points at it with `aria-labelledby`. The
             ids are page-unique rather than component-generated because this
             route renders exactly one of each. */}
-        <div className="flex flex-col gap-1.5">
+        <div className="flex w-full flex-col gap-1.5 sm:w-auto">
           <span id="history-user-label" className="text-sm text-muted-foreground">
             User
           </span>
@@ -138,7 +138,7 @@ function HistoryRoute() {
             disabled={users.isLoading}
             onValueChange={(value) => setFilters({ ...filters, userId: toFilter(value) })}
           >
-            <SelectTrigger className="w-56" aria-labelledby="history-user-label">
+            <SelectTrigger className="w-full sm:w-56" aria-labelledby="history-user-label">
               <SelectValue placeholder="All users" />
             </SelectTrigger>
             <SelectContent>
@@ -151,7 +151,7 @@ function HistoryRoute() {
             </SelectContent>
           </Select>
         </div>
-        <div className="flex flex-col gap-1.5">
+        <div className="flex w-full flex-col gap-1.5 sm:w-auto">
           <span id="history-library-label" className="text-sm text-muted-foreground">
             Library
           </span>
@@ -160,7 +160,7 @@ function HistoryRoute() {
             disabled={libraries.isLoading}
             onValueChange={(value) => setFilters({ ...filters, libraryId: toFilter(value) })}
           >
-            <SelectTrigger className="w-56" aria-labelledby="history-library-label">
+            <SelectTrigger className="w-full sm:w-56" aria-labelledby="history-library-label">
               <SelectValue placeholder="All libraries" />
             </SelectTrigger>
             <SelectContent>
