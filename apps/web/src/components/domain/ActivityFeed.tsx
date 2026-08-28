@@ -60,16 +60,19 @@ export function ActivityFeed({ rows, loading }: ActivityFeedProps) {
   return (
     <ul className="flex flex-col gap-3">
       {rows.map((row) => (
-        <li key={row.id} className="flex items-center justify-between gap-3 text-sm">
+        <li key={row.id} className="grid grid-cols-3 gap-3 text-sm">
           <div className="flex min-w-0 flex-col">
             <span className="truncate font-medium text-foreground">{row.itemName}</span>
             <span className="truncate text-xs text-muted-foreground">
-              {[formatEpisodeLabel(row), row.userName, formatDateTime(row.startedAt)]
+              {[formatEpisodeLabel(row), formatDateTime(row.startedAt)]
                 .filter((part) => part !== null)
                 .join(" · ")}
             </span>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex items-center gap-2 justify-self-center">
+            <span className="text-muted-foregroud">{row.userName}</span>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 justify-self-end">
             <Badge variant="secondary">{row.itemType}</Badge>
             <span className="text-muted-foreground">{formatDuration(row.watchMs)}</span>
           </div>
