@@ -2,12 +2,23 @@ import * as React from "react";
 
 import { cn } from "../../lib/cn";
 
+/**
+ * `min-w-0` is a deviation from the upstream shadcn card, and it is load-bearing.
+ *
+ * A grid or flex item defaults to `min-width: auto`, which means it refuses to
+ * shrink below its content's intrinsic width. A card holding a wide table
+ * therefore grows the track it sits in, that grows the page, and the whole
+ * window scrolls sideways — while the table's own `overflow-x-auto` wrapper
+ * never engages, because it was never the thing being squeezed. Adding it here
+ * rather than at each call site fixes every card that is or later becomes a
+ * flex/grid child; in normal flow it does nothing at all.
+ */
 function Card({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card"
       className={cn(
-        "flex flex-col gap-6 rounded-xl border border-border bg-card py-6 text-card-foreground",
+        "flex min-w-0 flex-col gap-6 rounded-xl border border-border bg-card py-6 text-card-foreground",
         className,
       )}
       {...props}
