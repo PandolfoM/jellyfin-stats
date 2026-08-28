@@ -1,12 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { createRoute } from "@tanstack/react-router";
-import { useState, type ChangeEvent } from "react";
+import { useState } from "react";
 
 import { historyQuery, libraryStatsQuery, userStatsQuery } from "../api/queries";
 import { DateRangePicker } from "../components/domain/DateRangePicker";
 import { PlaybackHistoryTable } from "../components/domain/PlaybackHistoryTable";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { Select } from "../components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
 import { defaultRange, type DateRange } from "../lib/range";
 import { PanelError } from "./PanelError";
 import { rootRoute } from "./__root";
@@ -22,6 +28,18 @@ interface HistoryFilters {
 }
 
 const EMPTY_FILTERS: HistoryFilters = { userId: "", libraryId: "" };
+
+// Radix's Select reserves the empty string: a `SelectItem` may not use it as a
+// value, because that is how the primitive represents "nothing selected" and
+// clears the field. The unfiltered choice therefore needs a real value, mapped
+// back to "" at the boundary so `HistoryFilters` keeps meaning what it always
+// meant — empty is no filter. Filter state is deliberately not changed to hold
+// this sentinel: `normalizeFilter` below, the query keys, and every existing
+// test all treat "" as the unfiltered case.
+const ALL_VALUE = "all";
+
+const toFilter = (value: string) => (value === ALL_VALUE ? "" : value);
+const toSelectValue = (filter: string) => (filter === "" ? ALL_VALUE : filter);
 
 /**
  * Empty string (a select's "All users"/"All libraries" option, and the
@@ -105,40 +123,56 @@ function HistoryRoute() {
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1.5 text-sm text-muted-foreground">
-          User
+        {/* Not `<label>` wrapping the control any more. Radix renders the
+            trigger as a `<button>`, which a label cannot be associated with
+            the way it can with a native `<select>` — so the visible text is a
+            `<span>` and the trigger points at it with `aria-labelledby`. The
+            ids are page-unique rather than component-generated because this
+            route renders exactly one of each. */}
+        <div className="flex flex-col gap-1.5">
+          <span id="history-user-label" className="text-sm text-muted-foreground">
+            User
+          </span>
           <Select
-            value={filters.userId}
+            value={toSelectValue(filters.userId)}
             disabled={users.isLoading}
-            onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-              setFilters({ ...filters, userId: event.target.value })
-            }
+            onValueChange={(value) => setFilters({ ...filters, userId: toFilter(value) })}
           >
-            <option value="">All users</option>
-            {(users.data ?? []).map((user) => (
-              <option key={user.userId} value={user.userId}>
-                {user.name}
-              </option>
-            ))}
+            <SelectTrigger className="w-56" aria-labelledby="history-user-label">
+              <SelectValue placeholder="All users" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_VALUE}>All users</SelectItem>
+              {(users.data ?? []).map((user) => (
+                <SelectItem key={user.userId} value={user.userId}>
+                  {user.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
-        </label>
-        <label className="flex flex-col gap-1.5 text-sm text-muted-foreground">
-          Library
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <span id="history-library-label" className="text-sm text-muted-foreground">
+            Library
+          </span>
           <Select
-            value={filters.libraryId}
+            value={toSelectValue(filters.libraryId)}
             disabled={libraries.isLoading}
-            onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-              setFilters({ ...filters, libraryId: event.target.value })
-            }
+            onValueChange={(value) => setFilters({ ...filters, libraryId: toFilter(value) })}
           >
-            <option value="">All libraries</option>
-            {(libraries.data ?? []).map((library) => (
-              <option key={library.libraryId} value={library.libraryId}>
-                {library.name}
-              </option>
-            ))}
+            <SelectTrigger className="w-56" aria-labelledby="history-library-label">
+              <SelectValue placeholder="All libraries" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_VALUE}>All libraries</SelectItem>
+              {(libraries.data ?? []).map((library) => (
+                <SelectItem key={library.libraryId} value={library.libraryId}>
+                  {library.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
-        </label>
+        </div>
       </div>
 
       <Card>

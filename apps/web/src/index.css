@@ -1,4 +1,9 @@
 @import "tailwindcss";
+/* Supplies the enter/exit utilities shadcn's overlay components rely on
+   (animate-in, fade-in-0, zoom-in-95, slide-in-from-*). Without it those
+   class names simply do not exist, and Select and Popover pop in with no
+   transition rather than failing visibly. */
+@import "tw-animate-css";
 
 /*
  * This dashboard is designed to live on a TV or a second monitor, so dark is
@@ -17,6 +22,13 @@
 
   --card: #121319;
   --card-foreground: #eceef2;
+
+  /* Floating surfaces — Select's listbox and Popover's panel. Lifted a step
+     above --card so a menu opened over a card still reads as being in front
+     of it, which matters more here than on a light theme where a shadow alone
+     does the work. */
+  --popover: #16171f;
+  --popover-foreground: #eceef2;
 
   --primary: #7c3aed;
   --primary-foreground: #faf9ff;
@@ -44,6 +56,9 @@
 
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
+
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
 
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
