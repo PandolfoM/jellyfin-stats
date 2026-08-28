@@ -95,19 +95,29 @@ describe("ActivityFeed episode context and timestamp", () => {
   it("puts the series and S/E numbering on the episode row's meta line", () => {
     render(<ActivityFeed rows={ROWS} loading={false} />);
 
-    // ROWS[1] is the Episode fixture: The Bear-style series/season/episode.
-    // Series leads so it survives truncation on a narrow card.
-    const meta = screen.getByText(/Example Show · S2E5/);
-    expect(meta).toHaveTextContent("grace");
+    // ROWS[1] is the Episode fixture. The series leads the line so it survives
+    // truncation on a narrow card; the user has its own column and is
+    // deliberately not part of this string.
+    const meta = screen.getByText(/^Example Show · S2E5 · /);
+    expect(meta).toBeInTheDocument();
+    expect(meta).not.toHaveTextContent("grace");
   });
 
   it("leaves a movie's meta line without an episode prefix", () => {
     render(<ActivityFeed rows={ROWS} loading={false} />);
 
-    // ROWS[0] is the Movie fixture — it must not gain a stray separator or an
-    // empty leading segment from the join.
-    const meta = screen.getByText(/^ada · /);
-    expect(meta.textContent?.startsWith("ada")).toBe(true);
+    // ROWS[0] is the Movie fixture: formatEpisodeLabel returns null for it, and
+    // the filtered join must leave the timestamp alone rather than emitting a
+    // leading separator. So the whole line is just the timestamp.
+    const meta = screen.getByText(/^\d{1,2} \w{3}, \d{1,2}:\d{2} [AP]M$/);
+    expect(meta).toBeInTheDocument();
+  });
+
+  it("renders the user in its own column, outside the meta line", () => {
+    render(<ActivityFeed rows={ROWS} loading={false} />);
+
+    expect(screen.getByText("ada")).toBeInTheDocument();
+    expect(screen.getByText("grace")).toBeInTheDocument();
   });
 
   it("shows the time of day alongside the date", () => {
@@ -115,7 +125,7 @@ describe("ActivityFeed episode context and timestamp", () => {
 
     // Shape, not exact values: the timestamp renders in the reader's local
     // timezone. `formatDateTime`'s own tests pin a zone and assert the values.
-    const meta = screen.getByText(/^ada · /);
+    const meta = screen.getByText(/^Example Show · S2E5 · /);
     expect(meta.textContent).toMatch(/\d{1,2} \w{3}, \d{1,2}:\d{2} [AP]M$/);
   });
 });

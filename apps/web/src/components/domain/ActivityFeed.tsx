@@ -70,7 +70,7 @@ export function ActivityFeed({ rows, loading }: ActivityFeedProps) {
             </span>
           </div>
           <div className="flex items-center gap-2 justify-self-center">
-            <span className="text-muted-foregroud">{row.userName}</span>
+            <span className="text-muted-foreground">{row.userName}</span>
           </div>
           <div className="flex shrink-0 items-center gap-2 justify-self-end">
             <Badge variant="secondary">{row.itemType}</Badge>
