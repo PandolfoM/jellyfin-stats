@@ -11,6 +11,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { renderApp } from "../test/renderApp";
+import { changeFromDate } from "../test/dateRangePicker";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -131,14 +132,12 @@ describe("Overview route", () => {
     // matter what day the suite runs on — and only `from` moves, `to` is
     // left alone, so this exercises DateRangePicker's real onChange path
     // instead of hand-constructing a range this test happens to expect.
-    const fromInput = screen.getByLabelText("From");
-    const currentFrom = (fromInput as HTMLInputElement).value;
-    const shiftedFrom = new Date(Date.parse(`${currentFrom}T00:00:00.000Z`) - 3 * 86_400_000)
-      .toISOString()
-      .slice(0, 10);
+    // Driven through the real picker, which is a calendar now: `changeFromDate`
+    // opens it, clicks a selectable day, and reports back the date the
+    // component actually committed. Which day it lands on does not matter here
+    // — only that changing the range refetches with the new value.
+    const shiftedFrom = changeFromDate();
     expect(shiftedFrom).not.toBe(originalFrom);
-
-    fireEvent.change(fromInput, { target: { value: shiftedFrom } });
 
     await waitFor(() => expect(countCalls(calls, "/api/stats/overview")).toBeGreaterThanOrEqual(2));
 

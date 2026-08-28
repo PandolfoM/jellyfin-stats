@@ -18,10 +18,19 @@
 // "threads the filter" tests select a real fixture user/library by name
 // rather than typing an arbitrary id (there is no longer a text field to
 // type into).
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+//
+// Those selects are Radix comboboxes, not native `<select>`s, which changes
+// how they are driven here. The trigger is a `<button role="combobox">` and
+// the options do not exist in the DOM at all until it is opened, so a filter
+// is exercised by clicking the trigger and then the option — never by
+// `fireEvent.change`, which a Radix select does not respond to. `openSelect`
+// below wraps that, including the two jsdom accommodations it needs.
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { renderApp } from "../test/renderApp";
+import { changeFromDate } from "../test/dateRangePicker";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -118,6 +127,29 @@ function countCalls(calls: string[], pathIncludes: string): number {
   return calls.filter((url) => url.includes(pathIncludes)).length;
 }
 
+/**
+ * Radix marks the rest of the page `pointer-events: none` while a select is
+ * open, which is correct in a browser but makes user-event refuse to click the
+ * options it is guarding — so that check is disabled rather than worked around
+ * with `fireEvent`, which would skip the pointer sequence Radix listens for.
+ */
+const user = () => userEvent.setup({ pointerEventsCheck: 0 });
+
+/**
+ * Opens a Radix select trigger. `pointerdown` rather than `click`: that is the
+ * event the primitive opens on, and jsdom reports every element as zero-sized,
+ * which makes user-event's own click resolution unreliable here.
+ */
+async function openSelect(trigger: HTMLElement) {
+  // The trigger is disabled while its query is in flight, and a disabled
+  // trigger swallows the keypress silently — so this waits rather than
+  // opening into nothing and failing later on a missing option.
+  await waitFor(() => expect(trigger).not.toBeDisabled());
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: "ArrowDown" });
+  await screen.findByRole("listbox");
+}
+
 describe("History route", () => {
   it("fires /api/history with the default range and page 1's limit/offset", async () => {
     const calls = mockFetch({
@@ -150,12 +182,21 @@ describe("History route", () => {
 
     renderApp("/history");
 
-    const select = (await screen.findByLabelText("User")) as HTMLSelectElement;
-    await screen.findByRole("option", { name: "Ada Lovelace" });
+    // Read before opening: the trigger renders the current selection, so this
+    // asserts the default is the unfiltered choice — the Radix equivalent of
+    // the old `select.value === ""`.
+    const trigger = await screen.findByRole("combobox", { name: "User" });
+    expect(trigger).toHaveTextContent("All users");
 
-    const optionLabels = Array.from(select.options).map((option) => option.text);
+    await openSelect(trigger);
+
+    // Scoped to the listbox: "All users" is also the trigger's own text, so an
+    // unscoped query would match twice and the count would be wrong.
+    const listbox = await screen.findByRole("listbox");
+    const optionLabels = within(listbox)
+      .getAllByRole("option")
+      .map((option) => option.textContent);
     expect(optionLabels).toEqual(["All users", "Ada Lovelace"]);
-    expect(select.value).toBe("");
   });
 
   it("threads the userId filter into the request — not dropped, and not stuck on some other query key", async () => {
@@ -165,16 +206,12 @@ describe("History route", () => {
     await screen.findByTestId("history-route");
     await waitFor(() => expect(countCalls(calls, "/api/history")).toBeGreaterThanOrEqual(1));
 
-    const select = await screen.findByLabelText("User");
-    // Wait for the real fixture option to actually be in the DOM before
-    // selecting it — otherwise `fireEvent.change` below would set a value
-    // with no matching `<option>` yet, which jsdom (like a real browser)
-    // silently ignores rather than erroring on.
-    await screen.findByRole("option", { name: "Ada Lovelace" });
-    // A real fixture user's name, not a hand-typed GUID — proves the select
-    // is actually backed by `userStatsQuery`'s data, not a stand-in text
-    // field the test happens to accept any string into.
-    fireEvent.change(select, { target: { value: "user-fixture-1" } });
+    await openSelect(await screen.findByRole("combobox", { name: "User" }));
+    // A real fixture user's name, not a hand-typed GUID — proves the select is
+    // actually backed by `userStatsQuery`'s data, not a stand-in text field
+    // the test happens to accept any string into. `findByRole` also waits for
+    // the query to have resolved, so there is no separate wait needed.
+    await user().click(await screen.findByRole("option", { name: "Ada Lovelace" }));
 
     await waitFor(() =>
       expect(paramsFor(calls, "/api/history")?.get("userId")).toBe("user-fixture-1"),
@@ -188,9 +225,8 @@ describe("History route", () => {
     await screen.findByTestId("history-route");
     await waitFor(() => expect(countCalls(calls, "/api/history")).toBeGreaterThanOrEqual(1));
 
-    const select = await screen.findByLabelText("Library");
-    await screen.findByRole("option", { name: "Movies" });
-    fireEvent.change(select, { target: { value: "library-fixture-1" } });
+    await openSelect(await screen.findByRole("combobox", { name: "Library" }));
+    await user().click(await screen.findByRole("option", { name: "Movies" }));
 
     await waitFor(() =>
       expect(paramsFor(calls, "/api/history")?.get("libraryId")).toBe("library-fixture-1"),
@@ -231,12 +267,10 @@ describe("History route", () => {
     // route that forgot to reset `page` on a filter/range change would ask
     // for offset 50 against the new, possibly much smaller filtered set,
     // which can render an empty page even though matching rows exist.
-    const fromInput = screen.getByLabelText("From");
-    const currentFrom = (fromInput as HTMLInputElement).value;
-    const shiftedFrom = new Date(Date.parse(`${currentFrom}T00:00:00.000Z`) - 3 * 86_400_000)
-      .toISOString()
-      .slice(0, 10);
-    fireEvent.change(fromInput, { target: { value: shiftedFrom } });
+    // Driven through the real picker, which is a calendar now: `changeFromDate`
+    // opens it, clicks a selectable day, and reports back the date the
+    // component actually committed.
+    const shiftedFrom = changeFromDate();
 
     await waitFor(() => expect(paramsFor(calls, "/api/history")?.get("from")).toBe(shiftedFrom));
     expect(paramsFor(calls, "/api/history")?.get("offset")).toBe("0");
@@ -289,8 +323,8 @@ describe("History route", () => {
     // The filter selects and date picker are route chrome, not part of the
     // failed query's own render — a 500 on `history` must not take them
     // down with it.
-    expect(screen.getByLabelText("User")).toBeInTheDocument();
-    expect(screen.getByLabelText("Library")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "User" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Library" })).toBeInTheDocument();
   });
 
   it("redirects to /login instead of rendering an error card on a 401", async () => {
