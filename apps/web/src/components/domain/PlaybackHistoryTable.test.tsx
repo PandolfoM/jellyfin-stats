@@ -270,8 +270,8 @@ describe("PlaybackHistoryTable started column", () => {
     // Asserted as a shape rather than exact strings: the column renders in the
     // reader's local timezone, so the literal hours depend on where the suite
     // runs. `formatDateTime`'s own tests pin a timezone and check the values.
-    expect(cells[0]).toMatch(/^\d{1,2} \w{3}, \d{2}:\d{2}$/);
-    expect(cells[1]).toMatch(/^\d{1,2} \w{3}, \d{2}:\d{2}$/);
+    expect(cells[0]).toMatch(/^\d{1,2} \w{3}, \d{1,2}:\d{2} [AP]M$/);
+    expect(cells[1]).toMatch(/^\d{1,2} \w{3}, \d{1,2}:\d{2} [AP]M$/);
     expect(cells[0]).not.toBe(cells[1]);
   });
 });

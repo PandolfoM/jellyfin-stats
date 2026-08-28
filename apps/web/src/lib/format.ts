@@ -69,9 +69,10 @@ export function formatEpisodeLabel({
 }
 
 /**
- * A full ISO timestamp as a date and a 24-hour clock time, e.g.
- * `"1 Jan, 20:15"`. Used by the history table's Started column, where the day
- * alone left two sessions hours apart looking identical.
+ * A full ISO timestamp as a date and a 12-hour clock time, e.g.
+ * `"1 Jan, 8:15 PM"`. Used by the history table's Started column and the
+ * dashboard's activity feed, where the day alone left two sessions hours apart
+ * looking identical.
  *
  * Rendered in the **viewer's local timezone**, which is the opposite of what
  * `formatDay` above does — and deliberately so. `formatDay` takes a
@@ -90,7 +91,14 @@ export function formatDateTime(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "—";
 
-  const hours = String(date.getHours()).padStart(2, "0");
+  const hours24 = date.getHours();
+  // Midnight and noon are the two the modulo alone gets wrong: 0 % 12 and
+  // 12 % 12 are both 0, which would print "0:30 AM" rather than "12:30 AM".
+  const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
+  const meridiem = hours24 < 12 ? "AM" : "PM";
   const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${date.getDate()} ${MONTHS[date.getMonth()] ?? "?"}, ${hours}:${minutes}`;
+
+  // The hour is not zero-padded — "8:15 PM", not "08:15 PM" — which is the
+  // convention for a 12-hour clock. Minutes still are, since "8:5 PM" is not.
+  return `${date.getDate()} ${MONTHS[date.getMonth()] ?? "?"}, ${hours12}:${minutes} ${meridiem}`;
 }

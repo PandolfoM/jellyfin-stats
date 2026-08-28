@@ -116,6 +116,6 @@ describe("ActivityFeed episode context and timestamp", () => {
     // Shape, not exact values: the timestamp renders in the reader's local
     // timezone. `formatDateTime`'s own tests pin a zone and assert the values.
     const meta = screen.getByText(/^ada · /);
-    expect(meta.textContent).toMatch(/\d{1,2} \w{3}, \d{2}:\d{2}$/);
+    expect(meta.textContent).toMatch(/\d{1,2} \w{3}, \d{1,2}:\d{2} [AP]M$/);
   });
 });

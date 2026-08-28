@@ -144,12 +144,24 @@ describe("formatDateTime", () => {
     vi.unstubAllEnvs();
   });
 
-  it("renders the date and a 24-hour clock time", () => {
-    expect(formatDateTime("2026-01-01T20:15:00.000Z")).toBe("1 Jan, 20:15");
+  it("renders the date and a 12-hour clock time", () => {
+    expect(formatDateTime("2026-01-01T20:15:00.000Z")).toBe("1 Jan, 8:15 PM");
   });
 
-  it("zero-pads the time so the column stays aligned", () => {
-    expect(formatDateTime("2026-03-09T04:05:00.000Z")).toBe("9 Mar, 04:05");
+  it("zero-pads the minutes but not the hour, as a 12-hour clock does", () => {
+    expect(formatDateTime("2026-03-09T04:05:00.000Z")).toBe("9 Mar, 4:05 AM");
+  });
+
+  it("renders midnight as 12 AM, not 0 AM", () => {
+    // `hours % 12` is 0 at midnight, so a naive conversion prints "0:30 AM".
+    expect(formatDateTime("2026-01-01T00:30:00.000Z")).toBe("1 Jan, 12:30 AM");
+  });
+
+  it("renders noon as 12 PM, not 0 PM", () => {
+    // The same modulo trap at the other end, and the boundary where the
+    // meridiem flips: 12:00 is PM, 11:59 is AM.
+    expect(formatDateTime("2026-01-01T12:00:00.000Z")).toBe("1 Jan, 12:00 PM");
+    expect(formatDateTime("2026-01-01T11:59:00.000Z")).toBe("1 Jan, 11:59 AM");
   });
 
   it("distinguishes two sessions on the same day", () => {
@@ -180,13 +192,13 @@ describe("formatDateTime in a non-UTC timezone", () => {
 
   it("renders the local wall-clock time, not the UTC time", () => {
     // 20:15 UTC is 15:15 EST on this date.
-    expect(formatDateTime("2026-01-01T20:15:00.000Z")).toBe("1 Jan, 15:15");
+    expect(formatDateTime("2026-01-01T20:15:00.000Z")).toBe("1 Jan, 3:15 PM");
   });
 
   it("rolls the date back when the local offset crosses midnight", () => {
     // 02:30 UTC on 2 Jan is still 21:30 on 1 Jan in New York. Printing the UTC
     // date beside a local time would show "2 Jan, 21:30" — a timestamp that
     // never existed.
-    expect(formatDateTime("2026-01-02T02:30:00.000Z")).toBe("1 Jan, 21:30");
+    expect(formatDateTime("2026-01-02T02:30:00.000Z")).toBe("1 Jan, 9:30 PM");
   });
 });
