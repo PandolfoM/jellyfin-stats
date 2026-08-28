@@ -1,5 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { formatCount, formatDay, formatDuration, formatPercent } from "./format";
+import {
+  formatCount,
+  formatDay,
+  formatDuration,
+  formatEpisodeLabel,
+  formatPercent,
+} from "./format";
 
 describe("formatDuration", () => {
   it("renders hours and minutes above an hour", () => {
@@ -75,5 +81,52 @@ describe("formatPercent", () => {
   it("renders the 0 and 1 boundaries", () => {
     expect(formatPercent(0)).toBe("0%");
     expect(formatPercent(1)).toBe("100%");
+  });
+});
+
+describe("formatEpisodeLabel", () => {
+  it("joins the series name with the season and episode numbers", () => {
+    expect(formatEpisodeLabel({ seriesName: "The Bear", seasonNumber: 2, episodeNumber: 5 })).toBe(
+      "The Bear · S2E5",
+    );
+  });
+
+  it("keeps season 0 rather than dropping it, since specials really are season 0", () => {
+    // A truthiness check on seasonNumber would render this as "E3" and imply
+    // it belongs to whatever season the rows around it are from.
+    expect(formatEpisodeLabel({ seriesName: "The Bear", seasonNumber: 0, episodeNumber: 3 })).toBe(
+      "The Bear · S0E3",
+    );
+  });
+
+  it("renders the series alone when Jellyfin sent no numbering", () => {
+    expect(
+      formatEpisodeLabel({ seriesName: "The Bear", seasonNumber: null, episodeNumber: null }),
+    ).toBe("The Bear");
+  });
+
+  it("renders the numbering alone when the series name is missing", () => {
+    expect(formatEpisodeLabel({ seriesName: null, seasonNumber: 2, episodeNumber: 5 })).toBe(
+      "S2E5",
+    );
+  });
+
+  it("renders a half-numbered episode without a stray separator", () => {
+    expect(formatEpisodeLabel({ seriesName: null, seasonNumber: null, episodeNumber: 5 })).toBe(
+      "E5",
+    );
+    expect(formatEpisodeLabel({ seriesName: null, seasonNumber: 2, episodeNumber: null })).toBe(
+      "S2",
+    );
+  });
+
+  it("returns null when there is no episode context at all, so callers can omit the line", () => {
+    expect(
+      formatEpisodeLabel({ seriesName: null, seasonNumber: null, episodeNumber: null }),
+    ).toBeNull();
+    // An empty string is not a name worth a line of its own either.
+    expect(
+      formatEpisodeLabel({ seriesName: "", seasonNumber: null, episodeNumber: null }),
+    ).toBeNull();
   });
 });

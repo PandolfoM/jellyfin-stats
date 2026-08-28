@@ -25,6 +25,15 @@ export interface HistoryRow {
   itemName: string;
   itemType: string;
   seriesId: string | null;
+  /**
+   * Episode context, null for anything that is not an episode (and for episodes
+   * synced before these columns existed, until the next full item sync). The UI
+   * renders whichever parts are present rather than assuming all three arrive
+   * together — a special can carry a series name and no numbering.
+   */
+  seriesName: string | null;
+  seasonNumber: number | null;
+  episodeNumber: number | null;
   libraryId: string | null;
   deviceName: string | null;
   client: string | null;
@@ -95,6 +104,9 @@ export async function getHistory(
     item_name: string | null;
     item_type: string | null;
     series_id: string | null;
+    series_name: string | null;
+    season_number: number | null;
+    episode_number: number | null;
     library_id: string | null;
     device_name: string | null;
     client: string | null;
@@ -110,7 +122,8 @@ export async function getHistory(
   }>(sql`
     SELECT
       s.id::text AS id, s.user_id, u.name AS user_name,
-      s.item_id, i.name AS item_name, i.type AS item_type, i.series_id, i.library_id,
+      s.item_id, i.name AS item_name, i.type AS item_type,
+      i.series_id, i.series_name, i.season_number, i.episode_number, i.library_id,
       d.name AS device_name, s.client, s.play_method,
       s.started_at, s.ended_at, s.watch_ms::text AS watch_ms, s.completed
     FROM playback_sessions s
@@ -138,6 +151,11 @@ export async function getHistory(
       itemName: row.item_name ?? "Unknown item",
       itemType: row.item_type ?? "Unknown",
       seriesId: row.series_id,
+      seriesName: row.series_name,
+      // Postgres INT arrives as a JS number through node-postgres, but a null column
+      // must stay null rather than becoming 0 — season 0 is a real value (specials).
+      seasonNumber: row.season_number === null ? null : Number(row.season_number),
+      episodeNumber: row.episode_number === null ? null : Number(row.episode_number),
       libraryId: row.library_id,
       deviceName: row.device_name,
       client: row.client,

@@ -8,6 +8,13 @@ const nowPlayingItemSchema = z.object({
   Type: z.string(),
   SeriesId: z.string().nullish(),
   SeasonId: z.string().nullish(),
+  // Episodes only. Jellyfin returns these on BaseItemDto by default (they are not
+  // opt-in `Fields` values), and they are absent — not zero — on movies and audio.
+  // `IndexNumber` is the episode number within its season, `ParentIndexNumber` the
+  // season number; a special outside any season carries ParentIndexNumber 0.
+  SeriesName: z.string().nullish(),
+  IndexNumber: z.number().nullish(),
+  ParentIndexNumber: z.number().nullish(),
   RunTimeTicks: z.number().nullish(),
   ProductionYear: z.number().nullish(),
   ImageTags: z.object({ Primary: z.string().nullish() }).nullish(),

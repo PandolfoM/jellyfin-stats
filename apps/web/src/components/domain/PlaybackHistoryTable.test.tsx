@@ -41,6 +41,9 @@ function makeRow(index: number, overrides: Partial<PlaybackHistoryRow> = {}): Pl
     itemName: `Example Item ${padded}`,
     itemType: "Movie",
     seriesId: null,
+    seriesName: null,
+    seasonNumber: null,
+    episodeNumber: null,
     libraryId: "library-example",
     deviceName: "Example Living Room TV",
     client: "Jellyfin Web",
@@ -239,5 +242,67 @@ describe("PlaybackHistoryTable rendering", () => {
 
     expect(screen.getByText("No playback history")).toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+});
+
+describe("PlaybackHistoryTable episode context", () => {
+  // "Fishes" or "Chapter 4" is unidentifiable on its own in a history that
+  // mixes shows together, so an episode row has to carry its series and its
+  // S/E numbering alongside the episode's own name.
+  function renderRows(rows: PlaybackHistoryRow[]) {
+    render(
+      <PlaybackHistoryTable
+        rows={rows}
+        total={rows.length}
+        page={1}
+        pageSize={PAGE_SIZE}
+        onPageChange={() => {}}
+        loading={false}
+      />,
+    );
+  }
+
+  it("shows the series, season and episode number alongside the episode name", () => {
+    renderRows([
+      makeRow(0, {
+        itemName: "Fishes",
+        itemType: "Episode",
+        seriesId: "series-a",
+        seriesName: "The Bear",
+        seasonNumber: 2,
+        episodeNumber: 6,
+      }),
+    ]);
+
+    expect(screen.getByTestId("playback-history-episode-label")).toHaveTextContent(
+      "The Bear · S2E6",
+    );
+    // The episode's own name is still rendered — the series line is added
+    // beside it, not swapped in for it.
+    expect(screen.getByText("Fishes")).toBeInTheDocument();
+  });
+
+  it("renders no episode line for a movie", () => {
+    renderRows([makeRow(0, { itemName: "Example Movie", itemType: "Movie" })]);
+
+    expect(screen.queryByTestId("playback-history-episode-label")).not.toBeInTheDocument();
+    expect(screen.getByText("Example Movie")).toBeInTheDocument();
+  });
+
+  it("renders what it has for an episode Jellyfin never numbered", () => {
+    // Extras and specials can arrive with a series but no IndexNumber, and
+    // episodes synced before the columns existed have neither until the next
+    // full item sync. Neither case should render an empty line or "SundefinedE".
+    renderRows([
+      makeRow(0, {
+        itemName: "Behind the Scenes",
+        itemType: "Episode",
+        seriesName: "The Bear",
+        seasonNumber: null,
+        episodeNumber: null,
+      }),
+    ]);
+
+    expect(screen.getByTestId("playback-history-episode-label")).toHaveTextContent("The Bear");
   });
 });

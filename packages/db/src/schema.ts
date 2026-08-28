@@ -41,6 +41,14 @@ export const items = pgTable(
     name: text("name").notNull(),
     seriesId: text("series_id"),
     seasonId: text("season_id"),
+    // Episode-only denormalisations of the parent series. `series_id` alone cannot
+    // supply these: item sync only fetches Movie/Episode/Audio, so no Series or
+    // Season row exists in this table to join against. Null on movies and audio,
+    // and null on episodes synced before this column existed until the next full
+    // item sync backfills them.
+    seriesName: text("series_name"),
+    seasonNumber: integer("season_number"),
+    episodeNumber: integer("episode_number"),
     productionYear: integer("production_year"),
     runtimeTicks: bigint("runtime_ticks", { mode: "number" }),
     imageTag: text("image_tag"),

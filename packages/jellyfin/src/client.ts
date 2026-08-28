@@ -41,6 +41,12 @@ export interface JellyfinItem {
   libraryId: string | null;
   seriesId: string | null;
   seasonId: string | null;
+  /** Episodes only; null on movies and audio. */
+  seriesName: string | null;
+  /** Season number (Jellyfin's ParentIndexNumber). Episodes only. */
+  seasonNumber: number | null;
+  /** Episode number within its season (Jellyfin's IndexNumber). Episodes only. */
+  episodeNumber: number | null;
   productionYear: number | null;
   runtimeTicks: number | null;
   imageTag: string | null;
@@ -151,6 +157,9 @@ export function createJellyfinClient(options: JellyfinClientOptions): JellyfinCl
           libraryId: library.id,
           seriesId: item.SeriesId ?? null,
           seasonId: item.SeasonId ?? null,
+          seriesName: item.SeriesName ?? null,
+          seasonNumber: item.ParentIndexNumber ?? null,
+          episodeNumber: item.IndexNumber ?? null,
           productionYear: item.ProductionYear ?? null,
           runtimeTicks: item.RunTimeTicks ?? null,
           imageTag: item.ImageTags?.Primary ?? null,

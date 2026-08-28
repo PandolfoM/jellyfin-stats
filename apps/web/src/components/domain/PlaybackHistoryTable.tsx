@@ -1,5 +1,5 @@
 import type { HistoryResponse } from "../../api/queries";
-import { formatCount, formatDay, formatDuration } from "../../lib/format";
+import { formatCount, formatDay, formatDuration, formatEpisodeLabel } from "../../lib/format";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
@@ -103,25 +103,44 @@ export function PlaybackHistoryTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((row) => (
-            <TableRow key={row.id} data-testid="playback-history-row" data-row-id={row.id}>
-              <TableCell className="text-muted-foreground">
-                {formatDay(row.startedAt.slice(0, 10))}
-              </TableCell>
-              <TableCell className="max-w-64 truncate font-medium text-foreground">
-                {row.itemName}
-              </TableCell>
-              <TableCell>
-                <Badge variant="secondary">{row.itemType}</Badge>
-              </TableCell>
-              <TableCell>{row.userName}</TableCell>
-              <TableCell className="text-muted-foreground">
-                {row.deviceName ?? row.client ?? "—"}
-              </TableCell>
-              <TableCell className="text-right">{formatDuration(row.watchMs)}</TableCell>
-              <TableCell>{row.completed ? "Yes" : "No"}</TableCell>
-            </TableRow>
-          ))}
+          {rows.map((row) => {
+            const episodeLabel = formatEpisodeLabel(row);
+
+            return (
+              <TableRow key={row.id} data-testid="playback-history-row" data-row-id={row.id}>
+                <TableCell className="text-muted-foreground">
+                  {formatDay(row.startedAt.slice(0, 10))}
+                </TableCell>
+                <TableCell className="max-w-64">
+                  {/*
+                  Episodes get their series and S/E numbering on a line above the
+                  episode's own name — "Fishes" alone is unidentifiable in a mixed
+                  history. `formatEpisodeLabel` returns null for anything with no
+                  episode context (every movie and track, plus episodes not yet
+                  re-synced), so those rows render exactly as they did before.
+                */}
+                  {episodeLabel !== null && (
+                    <span
+                      className="block truncate text-xs text-muted-foreground"
+                      data-testid="playback-history-episode-label"
+                    >
+                      {episodeLabel}
+                    </span>
+                  )}
+                  <span className="block truncate font-medium text-foreground">{row.itemName}</span>
+                </TableCell>
+                <TableCell>
+                  <Badge variant="secondary">{row.itemType}</Badge>
+                </TableCell>
+                <TableCell>{row.userName}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  {row.deviceName ?? row.client ?? "—"}
+                </TableCell>
+                <TableCell className="text-right">{formatDuration(row.watchMs)}</TableCell>
+                <TableCell>{row.completed ? "Yes" : "No"}</TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
 

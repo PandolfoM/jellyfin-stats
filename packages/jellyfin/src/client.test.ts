@@ -181,4 +181,32 @@ describe("createJellyfinClient", () => {
     expect(movieItem?.libraryId).not.toBe(itemsByLibraryFixture.movies.Items[0]?.ParentId);
     expect(episodeItem?.libraryId).not.toBe(itemsByLibraryFixture.shows.Items[0]?.ParentId);
   });
+
+  it("maps an episode's series name and Jellyfin's index numbers", async () => {
+    // Jellyfin names these from the item's own point of view: IndexNumber is the
+    // episode's position in its season, and ParentIndexNumber the season's position
+    // in the series. Swapping the two is the obvious mistake, so both are asserted.
+    const { movies, shows } = librariesFixture;
+    const { client } = clientWithRoutes([
+      ["/Library/VirtualFolders", [movies, shows]],
+      [`ParentId=${movies.ItemId}`, itemsByLibraryFixture.movies],
+      [`ParentId=${shows.ItemId}`, itemsByLibraryFixture.shows],
+    ]);
+
+    const items = await client.getItems();
+    const movieItem = items.find((item) => item.type === "Movie");
+    const episodeItem = items.find((item) => item.type === "Episode");
+
+    expect(episodeItem).toMatchObject({
+      seriesName: "Fixture Series",
+      seasonNumber: 2,
+      episodeNumber: 5,
+    });
+
+    // A movie carries none of these fields; they must arrive null, not undefined,
+    // because upsertItems writes whatever it is handed straight into the columns.
+    expect(movieItem?.seriesName).toBeNull();
+    expect(movieItem?.seasonNumber).toBeNull();
+    expect(movieItem?.episodeNumber).toBeNull();
+  });
 });

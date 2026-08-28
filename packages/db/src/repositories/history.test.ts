@@ -80,6 +80,63 @@ describe("getHistory", () => {
     });
   });
 
+  it("carries the episode's series name and season/episode numbers through the join", async () => {
+    await withTestDatabase(async (db) => {
+      await seed(db);
+
+      // Season 0 on purpose: it is Jellyfin's specials season, a real value that a
+      // truthiness check anywhere along the path would turn into a null.
+      await db.insert(items).values([
+        {
+          id: "item-ep",
+          name: "Fishes",
+          type: "Episode",
+          libraryId: "lib-1",
+          seriesId: "series-1",
+          seriesName: "The Bear",
+          seasonNumber: 0,
+          episodeNumber: 6,
+        },
+      ]);
+      await db.insert(playbackSessions).values([
+        {
+          sessionId: "sess-ep",
+          userId: "user-a",
+          itemId: "item-ep",
+          deviceId: "dev-1",
+          // Later than every seeded session so it lands first on the newest-first page.
+          startedAt: new Date(BASE.getTime() + 3_600_000),
+          endedAt: new Date(BASE.getTime() + 3_630_000),
+          lastSeenAt: new Date(BASE.getTime() + 3_630_000),
+          watchMs: 30_000,
+          completed: false,
+        },
+      ]);
+
+      const { rows } = await getHistory(db, { limit: 1, offset: 0 });
+
+      expect(rows[0]).toMatchObject({
+        itemName: "Fishes",
+        seriesId: "series-1",
+        seriesName: "The Bear",
+        seasonNumber: 0,
+        episodeNumber: 6,
+      });
+    });
+  });
+
+  it("leaves the episode fields null for a movie", async () => {
+    await withTestDatabase(async (db) => {
+      await seed(db);
+
+      const { rows } = await getHistory(db, { limit: 1, offset: 0 });
+
+      expect(rows[0]?.seriesName).toBeNull();
+      expect(rows[0]?.seasonNumber).toBeNull();
+      expect(rows[0]?.episodeNumber).toBeNull();
+    });
+  });
+
   it("joins user, item, and device names", async () => {
     await withTestDatabase(async (db) => {
       await seed(db);

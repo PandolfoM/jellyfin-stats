@@ -23,6 +23,9 @@ export interface ItemInput {
   libraryId?: string | null;
   seriesId?: string | null;
   seasonId?: string | null;
+  seriesName?: string | null;
+  seasonNumber?: number | null;
+  episodeNumber?: number | null;
   productionYear?: number | null;
   runtimeTicks?: number | null;
   imageTag?: string | null;
@@ -90,6 +93,9 @@ export async function upsertItems(db: Db, rows: ItemInput[]): Promise<void> {
           name: sql`excluded.name`,
           seriesId: sql`excluded.series_id`,
           seasonId: sql`excluded.season_id`,
+          seriesName: sql`excluded.series_name`,
+          seasonNumber: sql`excluded.season_number`,
+          episodeNumber: sql`excluded.episode_number`,
           productionYear: sql`excluded.production_year`,
           runtimeTicks: sql`excluded.runtime_ticks`,
           imageTag: sql`excluded.image_tag`,
