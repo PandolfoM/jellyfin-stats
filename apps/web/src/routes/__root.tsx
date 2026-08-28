@@ -2,6 +2,7 @@ import { Navigate, Outlet, createRootRoute, useRouterState } from "@tanstack/rea
 
 import { useSession } from "../auth/session";
 import { AppShell } from "../components/domain/AppShell";
+import { CustomCssStyle } from "../components/domain/CustomCssStyle";
 import { Skeleton } from "../components/ui/skeleton";
 
 const LOGIN_PATH = "/login";
@@ -81,6 +82,13 @@ function RootComponent() {
 
   return (
     <AppShell userName={session.user.userName} onLogout={() => void session.logout()}>
+      {/* Mounted here rather than inside AppShell, and only past every early
+          return above — so the operator's stylesheet reaches the dashboard but
+          never the login screen or the session error state. A rule that hides
+          everything therefore cannot stop anyone signing back in to clear it.
+          Keeping it out of AppShell also leaves that component props-only,
+          with no query of its own. */}
+      <CustomCssStyle />
       <Outlet />
     </AppShell>
   );

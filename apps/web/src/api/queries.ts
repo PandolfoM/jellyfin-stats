@@ -172,3 +172,16 @@ export function settingsQuery() {
     queryFn: async () => unwrap<SettingsResponse>(await api.api.settings.$get()),
   });
 }
+
+/**
+ * Saves (or, with an empty string, clears) the operator-editable custom CSS.
+ *
+ * A plain async function rather than a `mutationOptions` helper: this file
+ * exports query *options* because TanStack caches those by key, and a mutation
+ * has no cache entry to describe. The caller owns the `useMutation` and is
+ * responsible for invalidating `queryKeys.settings()` afterwards, so the
+ * editor and the injected stylesheet both re-read the saved value.
+ */
+export async function saveCustomCss(css: string): Promise<void> {
+  await unwrap<{ ok: boolean }>(await api.api.settings["custom-css"].$put({ json: { css } }));
+}

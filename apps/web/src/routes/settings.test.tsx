@@ -38,6 +38,7 @@ const SETTINGS_FIXTURE = {
   referenceSyncIntervalMs: 900_000,
   completionThreshold: 0.9,
   jellyfinUrl: "http://jellyfin.example.invalid",
+  customCss: "",
 };
 
 interface FetchOverrides {
@@ -85,15 +86,31 @@ describe("Settings route", () => {
     expect(await screen.findByText(/environment variable/i)).toBeInTheDocument();
   });
 
-  it("renders no editable input, switch, or save control anywhere on the page", async () => {
+  it("renders no editable control in the configuration card", async () => {
+    // Scoped to that card rather than the whole page, which now also carries
+    // the custom-CSS editor. The guard itself still matters and is unchanged
+    // in intent: everything the configuration card shows comes from
+    // environment variables fixed at deploy time, so a control that looked
+    // editable there could never save.
     mockFetch();
 
     renderApp("/settings");
 
-    await screen.findByTestId("settings-route");
-    expect(screen.queryAllByRole("textbox")).toHaveLength(0);
-    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
-    expect(screen.queryByRole("button", { name: /save/i })).not.toBeInTheDocument();
+    const card = within(await screen.findByTestId("settings-config-card"));
+    expect(card.queryAllByRole("textbox")).toHaveLength(0);
+    expect(card.queryAllByRole("checkbox")).toHaveLength(0);
+    expect(card.queryByRole("button", { name: /save/i })).not.toBeInTheDocument();
+  });
+
+  it("renders the custom CSS editor, which is editable", async () => {
+    // The counterpart to the assertion above: exactly one thing on this page
+    // is writable, and it is backed by a real endpoint.
+    mockFetch();
+
+    renderApp("/settings");
+
+    expect(await screen.findByLabelText("Custom CSS")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
   });
 
   it("shows the panel error for configuration but still shows the account and logout control on a 500", async () => {

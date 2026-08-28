@@ -1,10 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createRoute } from "@tanstack/react-router";
 
-import { settingsQuery } from "../api/queries";
+import { saveCustomCss, settingsQuery } from "../api/queries";
 import { useSession } from "../auth/session";
 import { SettingsAccountCard } from "../components/domain/SettingsAccountCard";
 import { SettingsConfigCard } from "../components/domain/SettingsConfigCard";
+import { SettingsCustomCssCard } from "../components/domain/SettingsCustomCssCard";
 import { PanelError } from "./PanelError";
 import { rootRoute } from "./__root";
 
@@ -41,6 +42,18 @@ import { rootRoute } from "./__root";
 function SettingsRoute() {
   const session = useSession();
   const settings = useQuery(settingsQuery());
+  const queryClient = useQueryClient();
+
+  // Invalidated rather than written into the cache directly: the stylesheet is
+  // also read by `CustomCssStyle` inside AppShell, and a refetch is what makes
+  // both it and this editor agree with what the server actually stored.
+  const saveCss = useMutation({
+    mutationFn: saveCustomCss,
+    // `settingsQuery().queryKey` rather than reaching for the `queryKeys` map,
+    // which queries.ts keeps module-private on purpose — the options object
+    // already carries the key, so nothing has to be widened to read it.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsQuery().queryKey }),
+  });
 
   const userName = session.user?.userName ?? "";
 
@@ -54,6 +67,14 @@ function SettingsRoute() {
         <PanelError testId="settings-error" />
       ) : (
         <SettingsConfigCard config={settings.data ?? null} loading={settings.isLoading} />
+      )}
+
+      {!settings.isError && (
+        <SettingsCustomCssCard
+          savedCss={settings.data?.customCss ?? null}
+          loading={settings.isLoading}
+          onSave={(css) => saveCss.mutateAsync(css)}
+        />
       )}
     </div>
   );
