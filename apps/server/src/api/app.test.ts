@@ -119,6 +119,23 @@ describe("createApp", () => {
     expect(response.status).toBe(401);
   });
 
+  it("rejects an unauthenticated write to the custom CSS endpoint", async () => {
+    // Regression test for a real hole: `app.use("/api/settings", ...)` matches
+    // that exact path and nothing beneath it, so this sub-path was initially
+    // ungated and an anonymous PUT persisted a stylesheet that every signed-in
+    // operator would then load. A gate on the sibling GET says nothing about
+    // this route, which is why it needs its own test.
+    const { app } = createApp(testContext());
+
+    const response = await app.request("/api/settings/custom-css", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ css: "body { display: none; }" }),
+    });
+
+    expect(response.status).toBe(401);
+  });
+
   it("rejects an unauthenticated request to /api/settings", async () => {
     // Proves requireAdmin is actually mounted ahead of this route, not just
     // written somewhere in the file — the effective sync intervals and

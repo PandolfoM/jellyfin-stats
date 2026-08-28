@@ -14,6 +14,7 @@ const CONFIG: SettingsResponse = {
   referenceSyncIntervalMs: 900_000,
   completionThreshold: 0.9,
   jellyfinUrl: "http://jellyfin.example.invalid",
+  customCss: "",
 };
 
 describe("SettingsConfigCard", () => {

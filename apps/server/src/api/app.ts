@@ -5,7 +5,9 @@ import {
   getTopItems,
   getUserDetail,
   getUserStats,
+  getSetting,
   getWatchTimeSeries,
+  setSetting,
 } from "@jfstats/db";
 import type { AppEnv } from "@jfstats/shared";
 import { Hono } from "hono";
@@ -135,6 +137,15 @@ export function createApp(context: AppContext) {
   // URL are configuration, not secrets — but they are still only meant for
   // whoever configured this deployment, not anyone who can reach the port.
   app.use("/api/settings", requireAdmin(sessions, cookieConfig));
+  // BOTH lines are required. Hono matches `app.use` by path, and
+  // "/api/settings" matches that exact path only — it does not cover
+  // "/api/settings/custom-css" beneath it, nor does the wildcard below cover
+  // the bare path. Registering only the exact one left the custom-CSS write
+  // endpoint completely ungated: an anonymous PUT returned 200 and persisted
+  // a stylesheet served to every signed-in operator. Any future sub-path of
+  // /api/settings is covered by the wildcard; deleting either line reopens a
+  // hole that no test on the other path would notice.
+  app.use("/api/settings/*", requireAdmin(sessions, cookieConfig));
 
   // Captured, and threaded into every registerXRoutes call below, because the
   // chained return value is what the web client's AppType is built from — see
@@ -188,6 +199,8 @@ export function createApp(context: AppContext) {
     referenceSyncIntervalMs: context.env.REFERENCE_SYNC_INTERVAL_MS,
     completionThreshold: context.env.COMPLETION_THRESHOLD,
     jellyfinUrl: context.env.JELLYFIN_URL,
+    getCustomCss: () => getSetting(context.db, "custom_css"),
+    saveCustomCss: (css) => setSetting(context.db, "custom_css", css),
   });
 
   const imagesApp = registerImageRoutes(settingsApp, {

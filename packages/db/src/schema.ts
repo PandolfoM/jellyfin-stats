@@ -178,3 +178,20 @@ export const jobRuns = pgTable("job_runs", {
   name: text("name").primaryKey(),
   lastRunAt: timestamp("last_run_at", { withTimezone: true }).notNull(),
 });
+
+/**
+ * Operator-editable application settings, as one row per key.
+ *
+ * Key/value rather than a column per setting: these are values a human edits
+ * through the Settings screen at runtime, and each new one should be an INSERT,
+ * not a migration. That is the opposite of everything in `packages/shared`'s
+ * env schema, which is fixed at deploy time and belongs in `.env`.
+ *
+ * `value` is `text` and always non-null. "Not configured" is the absence of the
+ * row, so a reader never has to distinguish null from empty string.
+ */
+export const appSettings = pgTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

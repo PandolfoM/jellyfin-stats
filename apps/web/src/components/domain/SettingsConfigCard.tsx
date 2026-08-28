@@ -36,15 +36,18 @@ function ConfigRow({ label, value, loading }: ConfigRowProps) {
  * only — no query of its own; `routes/settings.tsx` owns `useQuery(settingsQuery())`
  * and passes the result straight through.
  *
- * Read-only by design: `GET /api/settings` (apps/server/src/api/routes/settings.ts)
- * has no corresponding mutation endpoint, so this renders plain text only —
- * never an input, switch, or save button. A control that looks editable but
- * cannot save would be worse than no control at all, which is why the
- * description below says outright where these values actually come from.
+ * Read-only by design, and still read-only now that `/api/settings` does have
+ * a mutation endpoint beside it: everything this card shows comes from
+ * environment variables fixed when the server was deployed, so no amount of
+ * clicking here could change them. That endpoint writes exactly one runtime
+ * setting, the custom stylesheet, which has its own editable card
+ * (`SettingsCustomCssCard`). A control that looks editable but cannot save
+ * would be worse than no control at all, which is why the description below
+ * says outright where these values come from.
  */
 export function SettingsConfigCard({ config, loading }: SettingsConfigCardProps) {
   return (
-    <Card>
+    <Card data-testid="settings-config-card">
       <CardHeader>
         <CardTitle>Configuration</CardTitle>
         <CardDescription>

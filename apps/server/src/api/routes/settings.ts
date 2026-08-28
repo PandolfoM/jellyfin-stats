@@ -1,4 +1,6 @@
+import { MAX_SETTING_LENGTH } from "@jfstats/db";
 import type { Env, Hono, Schema } from "hono";
+import { z } from "zod";
 
 /**
  * The exact, non-secret fields `GET /api/settings` may ever return.
@@ -18,7 +20,22 @@ export interface SettingsDeps {
   referenceSyncIntervalMs: number;
   completionThreshold: number;
   jellyfinUrl: string;
+  /**
+   * Reads the operator-editable custom CSS, or null when none is saved. A
+   * function rather than a value because unlike the four env fields above,
+   * this changes at runtime — resolving it once at wiring time would serve a
+   * stale stylesheet until the process restarted.
+   */
+  getCustomCss(): Promise<string | null>;
+  saveCustomCss(css: string): Promise<void>;
 }
+
+const customCssSchema = z.object({
+  // Bounded here as well as in the repository: an unbounded body should never
+  // reach the database layer in the first place. Empty string is allowed and
+  // means "clear it" -- setSetting deletes the row rather than storing one.
+  css: z.string().max(MAX_SETTING_LENGTH),
+});
 
 /**
  * Returns the app with this route chained onto it (rather than `void`), the
@@ -40,12 +57,25 @@ export function registerSettingsRoutes<E extends Env, S extends Schema>(
   app: Hono<E, S>,
   deps: SettingsDeps,
 ) {
-  return app.get("/api/settings", (c) =>
-    c.json({
-      sessionPollIntervalMs: deps.sessionPollIntervalMs,
-      referenceSyncIntervalMs: deps.referenceSyncIntervalMs,
-      completionThreshold: deps.completionThreshold,
-      jellyfinUrl: deps.jellyfinUrl,
-    }),
-  );
+  return app
+    .get("/api/settings", async (c) =>
+      c.json({
+        sessionPollIntervalMs: deps.sessionPollIntervalMs,
+        referenceSyncIntervalMs: deps.referenceSyncIntervalMs,
+        completionThreshold: deps.completionThreshold,
+        jellyfinUrl: deps.jellyfinUrl,
+        // Empty string rather than null, so the client has one type to render
+        // into a textarea and does not need a null branch of its own.
+        customCss: (await deps.getCustomCss()) ?? "",
+      }),
+    )
+    .put("/api/settings/custom-css", async (c) => {
+      const body = customCssSchema.safeParse(await c.req.json().catch(() => null));
+      if (!body.success) {
+        return c.json({ error: "invalid_request" }, 400);
+      }
+
+      await deps.saveCustomCss(body.data.css);
+      return c.json({ ok: true });
+    });
 }
