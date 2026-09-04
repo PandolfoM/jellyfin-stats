@@ -15,6 +15,7 @@ describe("schema", () => {
 
       expect(tables).toEqual(
         [
+          "app_settings",
           "devices",
           "items",
           "jellyfin_users",
