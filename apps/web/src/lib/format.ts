@@ -121,3 +121,27 @@ const TICKS_PER_MS = 10_000;
 export function ticksToMs(ticks: number): number {
   return ticks / TICKS_PER_MS;
 }
+
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+/**
+ * "12 min ago" / "3 h ago" / "2 days ago" for a past instant, relative to
+ * `now` — for "last synced" style status lines where the reader wants
+ * staleness at a glance, not a wall-clock time. Under a minute is "just
+ * now"; the input is a full ISO timestamp, so unlike `formatDay` this one
+ * does go through `Date`.
+ */
+export function formatRelativeTime(iso: string, now: number = Date.now()): string {
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return "—";
+
+  const elapsed = Math.max(0, now - at);
+  if (elapsed < MINUTE_MS) return "just now";
+  if (elapsed < HOUR_MS) return `${Math.floor(elapsed / MINUTE_MS)} min ago`;
+  if (elapsed < DAY_MS) return `${Math.floor(elapsed / HOUR_MS)} h ago`;
+
+  const days = Math.floor(elapsed / DAY_MS);
+  return days === 1 ? "1 day ago" : `${days} days ago`;
+}

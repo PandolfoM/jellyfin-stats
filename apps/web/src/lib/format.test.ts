@@ -7,6 +7,7 @@ import {
   formatEpisodeLabel,
   formatPercent,
   formatFullDate,
+  formatRelativeTime,
   ticksToMs,
 } from "./format";
 
@@ -218,5 +219,27 @@ describe("formatFullDate", () => {
 describe("ticksToMs", () => {
   it("converts Jellyfin's 100ns ticks to milliseconds", () => {
     expect(ticksToMs(72_000_000_000)).toBe(7_200_000);
+  });
+});
+
+describe("formatRelativeTime", () => {
+  const NOW = Date.parse("2026-09-04T12:00:00Z");
+
+  it("renders seconds-old instants as 'just now'", () => {
+    expect(formatRelativeTime("2026-09-04T11:59:40Z", NOW)).toBe("just now");
+  });
+
+  it("renders minutes, hours, and days ago", () => {
+    expect(formatRelativeTime("2026-09-04T11:48:00Z", NOW)).toBe("12 min ago");
+    expect(formatRelativeTime("2026-09-04T09:00:00Z", NOW)).toBe("3 h ago");
+    expect(formatRelativeTime("2026-09-02T12:00:00Z", NOW)).toBe("2 days ago");
+  });
+
+  it("uses the singular for exactly one day", () => {
+    expect(formatRelativeTime("2026-09-03T12:00:00Z", NOW)).toBe("1 day ago");
+  });
+
+  it("returns a dash for an unparseable instant", () => {
+    expect(formatRelativeTime("not a date", NOW)).toBe("—");
   });
 });

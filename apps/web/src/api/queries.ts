@@ -203,3 +203,19 @@ export function settingsQuery() {
 export async function saveCustomCss(css: string): Promise<void> {
   await unwrap<{ ok: boolean }>(await api.api.settings["custom-css"].$put({ json: { css } }));
 }
+
+export type TriggerSyncResponse = InferResponseType<
+  (typeof api.api.settings)["sync-now"]["$post"],
+  200 | 202
+>;
+
+/**
+ * Asks the server to run a full library sync now. Resolves as soon as the
+ * job has been *started* (or refused because one is already running) — not
+ * when it finishes; the caller watches `settingsQuery`'s `sync.running` for
+ * that. A plain function rather than `mutationOptions`, for the same reason
+ * as `saveCustomCss` above.
+ */
+export async function triggerSync(): Promise<TriggerSyncResponse> {
+  return unwrap<TriggerSyncResponse>(await api.api.settings["sync-now"].$post());
+}

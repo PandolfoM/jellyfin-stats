@@ -39,11 +39,13 @@ const SETTINGS_FIXTURE = {
   completionThreshold: 0.9,
   jellyfinUrl: "http://jellyfin.example.invalid",
   customCss: "",
+  sync: { available: true, running: false, lastRunAt: null },
 };
 
 interface FetchOverrides {
   settings?: () => Response;
   logout?: () => Response;
+  syncNow?: () => Response;
 }
 
 function mockFetch(overrides: FetchOverrides = {}): string[] {
@@ -57,6 +59,8 @@ function mockFetch(overrides: FetchOverrides = {}): string[] {
       if (url.includes("/api/auth/me")) return jsonResponse(JSON.parse(AUTHENTICATED_BODY));
       if (url.includes("/api/auth/logout"))
         return overrides.logout?.() ?? jsonResponse({ ok: true });
+      if (url.includes("/api/settings/sync-now"))
+        return overrides.syncNow?.() ?? jsonResponse({ started: true }, 202);
       if (url.includes("/api/settings"))
         return overrides.settings?.() ?? jsonResponse(SETTINGS_FIXTURE);
 
@@ -149,4 +153,47 @@ describe("Settings route", () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
   });
+
+  it("clicking Sync now POSTs to the sync endpoint and re-reads settings for the new status", async () => {
+    const calls = mockFetch();
+
+    renderApp("/settings");
+    const route = await screen.findByTestId("settings-route");
+    const settingsReadsBefore = calls.filter((url) => url.endsWith("/api/settings")).length;
+
+    await userEvent.click(await within(route).findByRole("button", { name: "Sync now" }));
+
+    await waitFor(() =>
+      expect(calls.filter((url) => url.includes("/api/settings/sync-now"))).toHaveLength(1),
+    );
+    await waitFor(() =>
+      expect(calls.filter((url) => url.endsWith("/api/settings")).length).toBeGreaterThan(
+        settingsReadsBefore,
+      ),
+    );
+  });
+
+  it("keeps polling settings while a sync is running, so the button re-enables when it finishes", async () => {
+    let reads = 0;
+    const calls = mockFetch({
+      settings: () => {
+        reads += 1;
+        // Running for the first two reads, idle from the third on.
+        return jsonResponse({
+          ...SETTINGS_FIXTURE,
+          sync: { available: true, running: reads <= 2, lastRunAt: null },
+        });
+      },
+    });
+
+    renderApp("/settings");
+    const route = await screen.findByTestId("settings-route");
+
+    expect(await within(route).findByRole("button", { name: /syncing/i })).toBeDisabled();
+    await waitFor(
+      () => expect(within(route).getByRole("button", { name: "Sync now" })).toBeEnabled(),
+      { timeout: 8_000 },
+    );
+    expect(calls.filter((url) => url.endsWith("/api/settings")).length).toBeGreaterThanOrEqual(3);
+  }, 10_000);
 });

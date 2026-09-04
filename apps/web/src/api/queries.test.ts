@@ -3,6 +3,7 @@ import type { DateRange } from "../lib/range";
 import {
   historyQuery,
   itemDetailQuery,
+  triggerSync,
   libraryStatsQuery,
   overviewQuery,
   seriesQuery,
@@ -245,5 +246,24 @@ describe("historyQuery itemId filter", () => {
 
     const url = String(fetchMock.mock.calls[0]?.[0]);
     expect(new URL(url, "http://localhost").searchParams.get("itemId")).toBe("item-1");
+  });
+});
+
+describe("triggerSync", () => {
+  it("POSTs to the sync-now endpoint and resolves with whether a sync started", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ started: true }), {
+          status: 202,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(triggerSync()).resolves.toEqual({ started: true });
+
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).toContain("/api/settings/sync-now");
+    expect(init?.method).toBe("POST");
   });
 });
