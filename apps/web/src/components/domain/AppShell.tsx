@@ -77,7 +77,11 @@ const navLinkClassName = cn(
  */
 export function AppShell({ userName, onLogout, children }: AppShellProps) {
   return (
-    <div className="flex min-h-svh flex-col md:flex-row">
+    // Desktop: the shell is exactly the viewport and clips, so the sidebar
+    // never moves and <main> below is the single scroll container. Phone: the
+    // sidebar is a top bar and the page scrolls as one — pinning ~110px of nav
+    // to the top of a 375px-wide screen would cost more than it gives.
+    <div className="flex min-h-svh flex-col md:h-svh md:flex-row md:overflow-hidden">
       <aside className="flex flex-col gap-3 border-b border-border bg-card p-3 md:w-56 md:shrink-0 md:gap-0 md:border-r md:border-b-0 md:p-4">
         <div className="px-2 text-sm font-semibold text-foreground md:mb-6">Jellyfin Stats</div>
         {/* Horizontally scrollable on a phone: six destinations do not fit
@@ -126,7 +130,9 @@ export function AppShell({ userName, onLogout, children }: AppShellProps) {
       {/* `min-w-0` is what actually lets the tables inside scroll: without it a
           flex child refuses to shrink below its content's intrinsic width, so a
           wide table would stretch the page instead of scrolling within it. */}
-      <main className="min-w-0 flex-1 overflow-x-auto p-4 md:p-6">{children}</main>
+      <main className="min-w-0 flex-1 overflow-x-auto p-4 md:overflow-y-auto md:p-6">
+        {children}
+      </main>
     </div>
   );
 }
