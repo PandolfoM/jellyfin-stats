@@ -119,6 +119,16 @@ describe("createApp", () => {
     expect(response.status).toBe(401);
   });
 
+  it("rejects an unauthenticated request to the item detail API", async () => {
+    // Same reasoning as the image proxy: an open detail endpoint would let
+    // anyone who can reach the port read a private library by walking ids.
+    const { app } = createApp(testContext());
+
+    const response = await app.request("/api/items/a1b2c3d4e5f67890a1b2c3d4e5f67890");
+
+    expect(response.status).toBe(401);
+  });
+
   it("rejects an unauthenticated write to the custom CSS endpoint", async () => {
     // Regression test for a real hole: `app.use("/api/settings", ...)` matches
     // that exact path and nothing beneath it, so this sub-path was initially
