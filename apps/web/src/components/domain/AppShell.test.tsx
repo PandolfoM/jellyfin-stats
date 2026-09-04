@@ -96,6 +96,23 @@ describe("AppShell", () => {
     await waitFor(() => expect(onLogout).toHaveBeenCalledTimes(1));
   });
 
+  it("scrolls only the content on desktop — the shell is viewport-height and the sidebar stays put", async () => {
+    // jsdom does no layout, so this pins the classes that produce the split:
+    // the shell clips at the viewport at md and up, and <main> is the one
+    // element allowed to scroll vertically. Drop either and the whole page
+    // scrolls again, sidebar included.
+    renderAppShell(vi.fn());
+
+    const main = await screen.findByRole("main");
+    expect(main.className).toMatch(/(^|\s)md:overflow-y-auto(\s|$)/);
+    const shell = main.parentElement as HTMLElement;
+    expect(shell.className).toMatch(/(^|\s)md:h-svh(\s|$)/);
+    expect(shell.className).toMatch(/(^|\s)md:overflow-hidden(\s|$)/);
+    expect(screen.getByRole("complementary").className).not.toMatch(
+      /(^|\s)md:overflow-y-auto(\s|$)/,
+    );
+  });
+
   it("does not fetch anything itself", async () => {
     const fetchSpy = renderAppShell(vi.fn());
 
