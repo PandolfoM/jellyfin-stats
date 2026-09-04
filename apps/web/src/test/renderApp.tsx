@@ -4,6 +4,7 @@ import { render } from "@testing-library/react";
 
 import { SessionProvider } from "../auth/session";
 import { createAppRouter, type AppRouter } from "../router";
+import { installFakeEventSource } from "./fakeEventSource";
 
 /**
  * Renders the real route tree (via `createAppRouter`, the same assembly
@@ -19,6 +20,11 @@ import { createAppRouter, type AppRouter } from "../router";
  * extract instead of duplicate again.
  */
 export function renderApp(initialPath: string): AppRouter {
+  // The root opens the live feed for every signed-in render (the sidebar's
+  // indicator reads it), and jsdom has no EventSource. Tests that drive the
+  // feed install the fake themselves first; this only fills the gap for the
+  // ones that don't care.
+  if (typeof EventSource === "undefined") installFakeEventSource();
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createAppRouter(createMemoryHistory({ initialEntries: [initialPath] }));
   render(

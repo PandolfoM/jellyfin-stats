@@ -12,6 +12,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { dispatchSessions, FakeEventSource, installFakeEventSource } from "../test/fakeEventSource";
 import { renderApp } from "../test/renderApp";
 
 afterEach(() => vi.restoreAllMocks());
@@ -220,5 +221,43 @@ describe("protected-route gate", () => {
 
     expect(await screen.findByTestId("session-error")).toBeInTheDocument();
     expect(screen.queryByLabelText("Username")).not.toBeInTheDocument();
+  });
+
+  it("lights the sidebar's live indicator from the shared feed on a page other than /live", async () => {
+    installFakeEventSource();
+    mockAuthMeAndOverviewQueries(
+      () =>
+        new Response(AUTHENTICATED_BODY, {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+
+    renderApp("/");
+    await screen.findByRole("link", { name: /^live/i });
+
+    // One stream for the whole app, opened by the root, not by any route.
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(screen.queryByLabelText(/streams? playing/)).not.toBeInTheDocument();
+
+    dispatchSessions(FakeEventSource.latest(), [
+      {
+        sessionId: "s-1",
+        userId: "u-1",
+        userName: "viewer",
+        itemId: "0123456789abcdef0123456789abcdef",
+        itemName: "Sample Movie",
+        deviceId: "d-1",
+        deviceName: "TV",
+        client: "Jellyfin Web",
+        playMethod: "DirectPlay",
+        positionTicks: 0,
+        runtimeTicks: 100,
+        isPaused: false,
+        remoteEndpoint: null,
+      },
+    ]);
+
+    expect(await screen.findByLabelText("1 stream playing")).toBeInTheDocument();
   });
 });

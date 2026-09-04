@@ -1,5 +1,5 @@
 import type { LiveSession } from "@jfstats/shared";
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
 import { api, unwrap } from "./client";
 
@@ -77,7 +77,7 @@ const SESSIONS_EVENT = "sessions";
  * where there's something a viewer can actually see, not by discarding data
  * this hook has no reason to distrust.
  */
-export function useLiveSessions(): UseLiveSessionsResult {
+function useLiveSessionsSubscription(): UseLiveSessionsResult {
   const [sessions, setSessions] = useState<LiveSession[]>([]);
   const [connected, setConnected] = useState(false);
 
@@ -155,4 +155,30 @@ export function useLiveSessions(): UseLiveSessionsResult {
   }, []);
 
   return { sessions, connected };
+}
+
+const LiveSessionsContext = createContext<UseLiveSessionsResult | null>(null);
+
+/**
+ * Owns the one `EventSource` against `/api/live` for the whole signed-in
+ * app. Mounted once by the root route, so the sidebar's live indicator and
+ * the Live page read the same feed instead of each opening a stream — and
+ * navigating between pages no longer drops and reopens the connection.
+ */
+export function LiveSessionsProvider({ children }: { children: ReactNode }) {
+  const value = useLiveSessionsSubscription();
+  return <LiveSessionsContext.Provider value={value}>{children}</LiveSessionsContext.Provider>;
+}
+
+/**
+ * The live feed as the nearest `LiveSessionsProvider` sees it. Throws
+ * outside one: a silent `{ sessions: [], connected: false }` there would
+ * look exactly like "nothing is playing" and hide a wiring mistake.
+ */
+export function useLiveSessions(): UseLiveSessionsResult {
+  const value = useContext(LiveSessionsContext);
+  if (value === null) {
+    throw new Error("useLiveSessions must be used within a LiveSessionsProvider");
+  }
+  return value;
 }
