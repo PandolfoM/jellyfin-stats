@@ -12,6 +12,7 @@ import { EmptyState } from "../components/domain/EmptyState";
 import { PlaybackHistoryTable } from "../components/domain/PlaybackHistoryTable";
 import { StatCardRow } from "../components/domain/StatCardRow";
 import { TopContentList } from "../components/domain/TopContentList";
+import { UserAvatar } from "../components/domain/UserAvatar";
 import { defaultRange, type DateRange } from "../lib/range";
 import { PanelError } from "./PanelError";
 import { rootRoute } from "./__root";
@@ -93,7 +94,8 @@ function UserDetailRoute() {
   return (
     <div data-testid="user-detail-route" className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <UserAvatar userId={userId} name={detail.data?.name ?? ""} className="size-10" />
           <h1 className="text-lg font-semibold text-foreground">{detail.data?.name ?? "User"}</h1>
           {detail.data?.isAdmin === true && <Badge variant="secondary">Admin</Badge>}
         </div>

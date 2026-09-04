@@ -12,6 +12,9 @@ function build(overrides: Partial<ImageDeps> = {}) {
       async () =>
         new Response("binary", { status: 200, headers: { "content-type": "image/jpeg" } }),
     ),
+    fetchUserImage: vi.fn(
+      async () => new Response("avatar", { status: 200, headers: { "content-type": "image/png" } }),
+    ),
     ...overrides,
   };
   const app = new Hono();
@@ -185,5 +188,54 @@ describe("GET /api/images/items/:itemId", () => {
       expect(response.status).toBe(200);
       expect(deps.fetchImage).toHaveBeenCalledWith(VALID_ITEM_ID, expect.anything());
     });
+  });
+});
+
+describe("GET /api/images/users/:userId", () => {
+  const VALID_USER_ID = "0f0e0d0c0b0a09080706050403020100";
+
+  it("streams the upstream avatar with its content type and the private cache header", async () => {
+    const { app, deps } = build();
+
+    const response = await app.request(`/api/images/users/${VALID_USER_ID}?maxWidth=64`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(response.headers.get("cache-control")).toBe(`private, max-age=${CACHE_SECONDS}`);
+    expect(deps.fetchUserImage).toHaveBeenCalledWith(VALID_USER_ID, { maxWidth: 64 });
+    expect(deps.fetchImage).not.toHaveBeenCalled();
+  });
+
+  it("answers 404 when the user has no avatar, cancelling the upstream body", async () => {
+    const stream = new ReadableStream();
+    const cancelSpy = vi.spyOn(stream, "cancel");
+    const { app } = build({
+      fetchUserImage: vi.fn(async () => new Response(stream, { status: 404 })),
+    });
+
+    expect((await app.request(`/api/images/users/${VALID_USER_ID}`)).status).toBe(404);
+    expect(cancelSpy).toHaveBeenCalled();
+  });
+
+  it("answers 502 without the upstream message when Jellyfin is unreachable", async () => {
+    const { app } = build({
+      fetchUserImage: vi.fn(async () => {
+        throw new Error("connect ECONNREFUSED jellyfin.internal");
+      }),
+    });
+
+    const response = await app.request(`/api/images/users/${VALID_USER_ID}`);
+
+    expect(response.status).toBe(502);
+    expect(JSON.stringify(await response.json())).not.toContain("jellyfin.internal");
+  });
+
+  it("rejects an id that is not a 32-hex GUID and never calls the fetcher", async () => {
+    const { app, deps } = build();
+
+    const response = await app.request("/api/images/users/..%2F..%2FSystem%23");
+
+    expect(response.status).toBe(400);
+    expect(deps.fetchUserImage).not.toHaveBeenCalled();
   });
 });

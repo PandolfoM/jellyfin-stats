@@ -358,3 +358,23 @@ describe("PlaybackHistoryTable item links", () => {
     );
   });
 });
+
+describe("PlaybackHistoryTable avatars", () => {
+  it("shows the viewer's avatar beside their name", async () => {
+    await renderWithRouter(
+      <PlaybackHistoryTable
+        rows={[makeRow(0, { userId: "user-x", userName: "Ada Lovelace" })]}
+        total={1}
+        page={1}
+        pageSize={PAGE_SIZE}
+        onPageChange={() => {}}
+        loading={false}
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: "Avatar for Ada Lovelace" })).toHaveAttribute(
+      "src",
+      expect.stringContaining("/api/images/users/user-x"),
+    );
+  });
+});

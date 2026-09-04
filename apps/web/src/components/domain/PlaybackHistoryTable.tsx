@@ -7,6 +7,7 @@ import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { EmptyState } from "./EmptyState";
+import { UserAvatar } from "./UserAvatar";
 
 // There is no standalone `HistoryRow` export from queries.ts — the history
 // endpoint's response is `{ rows, total }` — so this is derived from the one
@@ -140,7 +141,12 @@ export function PlaybackHistoryTable({
                 <TableCell>
                   <Badge variant="secondary">{row.itemType}</Badge>
                 </TableCell>
-                <TableCell>{row.userName}</TableCell>
+                <TableCell>
+                  <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                    <UserAvatar userId={row.userId} name={row.userName} />
+                    {row.userName}
+                  </span>
+                </TableCell>
                 <TableCell className="text-muted-foreground">
                   {row.deviceName ?? row.client ?? "—"}
                 </TableCell>

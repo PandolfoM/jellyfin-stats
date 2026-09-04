@@ -145,3 +145,15 @@ describe("ActivityFeed item links", () => {
     );
   });
 });
+
+describe("ActivityFeed avatars", () => {
+  it("shows the viewer's avatar beside their name on each row", async () => {
+    await renderWithRouter(<ActivityFeed rows={ROWS} loading={false} />);
+
+    expect(screen.getByRole("img", { name: "Avatar for ada" })).toHaveAttribute(
+      "src",
+      expect.stringContaining("/api/images/users/user-1"),
+    );
+    expect(screen.getByRole("img", { name: "Avatar for grace" })).toBeInTheDocument();
+  });
+});

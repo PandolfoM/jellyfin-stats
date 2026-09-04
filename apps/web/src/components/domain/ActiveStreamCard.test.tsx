@@ -143,3 +143,18 @@ describe("ActiveStreamCard item links", () => {
     );
   });
 });
+
+describe("ActiveStreamCard avatars", () => {
+  it("shows the viewer's avatar in both variants", async () => {
+    const { rerender } = await renderWithRouter(
+      <ActiveStreamCard session={BASE_SESSION} variant="full" />,
+    );
+    expect(screen.getByRole("img", { name: "Avatar for sample-viewer" })).toHaveAttribute(
+      "src",
+      expect.stringContaining(`/api/images/users/${BASE_SESSION.userId}`),
+    );
+
+    await rerender(<ActiveStreamCard session={BASE_SESSION} variant="compact" />);
+    expect(screen.getByRole("img", { name: "Avatar for sample-viewer" })).toBeInTheDocument();
+  });
+});

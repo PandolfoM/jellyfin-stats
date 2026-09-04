@@ -1,6 +1,11 @@
 import type { LiveSession } from "@jfstats/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createApp, createImageFetcher, createLiveSubscriber } from "./app.js";
+import {
+  createApp,
+  createImageFetcher,
+  createLiveSubscriber,
+  createUserImageFetcher,
+} from "./app.js";
 import type { AppContext } from "../context.js";
 import { createSnapshotStore, type SnapshotStore } from "../sync/snapshot-store.js";
 
@@ -115,6 +120,14 @@ describe("createApp", () => {
     const { app } = createApp(testContext());
 
     const response = await app.request("/api/images/items/anything");
+
+    expect(response.status).toBe(401);
+  });
+
+  it("rejects an unauthenticated request to the user avatar proxy", async () => {
+    const { app } = createApp(testContext());
+
+    const response = await app.request("/api/images/users/0f0e0d0c0b0a09080706050403020100");
 
     expect(response.status).toBe(401);
   });
@@ -318,5 +331,31 @@ describe("createImageFetcher", () => {
     expect(requestedUrl).toBe(
       "http://jellyfin.internal:8096/Items/..%2F..%2FUsers%23/Images/Primary?maxWidth=400",
     );
+  });
+});
+
+describe("createUserImageFetcher", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("requests exactly the user's primary image path, with the key only in the header", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok"));
+    const fetchUserImage = createUserImageFetcher({
+      JELLYFIN_URL: "http://jellyfin.internal:8096",
+      JELLYFIN_API_KEY: "super-secret-admin-key",
+    });
+
+    await fetchUserImage("0f0e0d0c0b0a09080706050403020100", { maxWidth: 64 });
+
+    const requestedUrl = String(fetchSpy.mock.calls[0]?.[0]);
+    expect(requestedUrl).toBe(
+      "http://jellyfin.internal:8096/Users/0f0e0d0c0b0a09080706050403020100/Images/Primary?maxWidth=64",
+    );
+    expect(requestedUrl).not.toContain("super-secret-admin-key");
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit;
+    expect(init.headers).toMatchObject({
+      Authorization: 'MediaBrowser Token="super-secret-admin-key"',
+    });
   });
 });
