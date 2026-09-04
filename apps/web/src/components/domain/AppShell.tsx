@@ -9,7 +9,36 @@ import { cn } from "../../lib/cn";
 export interface AppShellProps {
   userName: string;
   onLogout: () => void;
+  /**
+   * Streams playing right now, for the indicator on the Live nav item. A
+   * number rather than the feed itself keeps this component props-only; the
+   * root route reads the feed and passes the count down.
+   */
+  liveCount: number;
   children: ReactNode;
+}
+
+/**
+ * The "recording" dot on the Live nav item: a solid red point with a soft
+ * ping ring so it reads as *happening now* at a glance from any page. The
+ * visible dot is decorative; the count lives in the aria-label so a screen
+ * reader hears "2 streams playing" rather than nothing.
+ */
+function LiveIndicator({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      role="status"
+      aria-label={`${count} ${count === 1 ? "stream" : "streams"} playing`}
+      className="relative ml-auto flex size-2.5 shrink-0"
+    >
+      <span
+        aria-hidden="true"
+        className="absolute inline-flex size-full animate-ping rounded-full bg-red-500 opacity-75"
+      />
+      <span aria-hidden="true" className="relative inline-flex size-2.5 rounded-full bg-red-500" />
+    </span>
+  );
 }
 
 interface NavItem {
@@ -75,7 +104,7 @@ const navLinkClassName = cn(
  * route (`routes/__root.tsx`) is the only caller, and it is the one that
  * reads the session and decides whether this component renders at all.
  */
-export function AppShell({ userName, onLogout, children }: AppShellProps) {
+export function AppShell({ userName, onLogout, liveCount, children }: AppShellProps) {
   return (
     // Desktop: the shell is exactly the viewport and clips, so the sidebar
     // never moves and <main> below is the single scroll container. Phone: the
@@ -106,6 +135,7 @@ export function AppShell({ userName, onLogout, children }: AppShellProps) {
               >
                 <Icon aria-hidden="true" className="size-4" />
                 {item.label}
+                {item.to === "/live" && <LiveIndicator count={liveCount} />}
               </Link>
             );
           })}

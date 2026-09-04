@@ -31,7 +31,7 @@ const EXPECTED_LINKS: ReadonlyArray<[label: string, href: string]> = [
   ["Settings", "/settings"],
 ];
 
-function renderAppShell(onLogout: () => void) {
+function renderAppShell(onLogout: () => void, liveCount = 0) {
   // A throwing fetch mock makes "no fetching of its own" a real assertion
   // rather than an absence of evidence — if AppShell (or anything it
   // renders) ever called fetch, this test fails loudly instead of silently
@@ -43,7 +43,7 @@ function renderAppShell(onLogout: () => void) {
 
   const testRootRoute = createRootRoute({
     component: () => (
-      <AppShell userName="Ada Lovelace" onLogout={onLogout}>
+      <AppShell userName="Ada Lovelace" onLogout={onLogout} liveCount={liveCount}>
         <div data-testid="shell-children">page content</div>
       </AppShell>
     ),
@@ -111,6 +111,27 @@ describe("AppShell", () => {
     expect(screen.getByRole("complementary").className).not.toMatch(
       /(^|\s)md:overflow-y-auto(\s|$)/,
     );
+  });
+
+  it("shows a live indicator on the Live nav item when streams are playing, with the count for screen readers", async () => {
+    renderAppShell(vi.fn(), 2);
+
+    const live = await screen.findByRole("link", { name: /^live/i });
+    expect(within(live).getByLabelText("2 streams playing")).toBeInTheDocument();
+  });
+
+  it("uses the singular for one stream", async () => {
+    renderAppShell(vi.fn(), 1);
+
+    const live = await screen.findByRole("link", { name: /^live/i });
+    expect(within(live).getByLabelText("1 stream playing")).toBeInTheDocument();
+  });
+
+  it("shows no indicator when nothing is playing", async () => {
+    renderAppShell(vi.fn(), 0);
+
+    await screen.findByRole("link", { name: /^live/i });
+    expect(screen.queryByLabelText(/streams? playing/)).not.toBeInTheDocument();
   });
 
   it("does not fetch anything itself", async () => {
