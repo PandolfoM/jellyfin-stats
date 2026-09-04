@@ -12,6 +12,7 @@ export interface HistoryOptions {
   offset: number;
   userId?: string;
   libraryId?: string;
+  itemId?: string;
   /** Inclusive `YYYY-MM-DD` UTC day, matched against the session's start day. */
   from?: string;
   to?: string;
@@ -87,6 +88,7 @@ export async function getHistory(
 
   if (options.userId !== undefined) filters.push(sql`s.user_id = ${options.userId}`);
   if (options.libraryId !== undefined) filters.push(sql`i.library_id = ${options.libraryId}`);
+  if (options.itemId !== undefined) filters.push(sql`s.item_id = ${options.itemId}`);
   if (options.from !== undefined) {
     filters.push(sql`(s.started_at AT TIME ZONE 'UTC')::date >= ${options.from}::date`);
   }
