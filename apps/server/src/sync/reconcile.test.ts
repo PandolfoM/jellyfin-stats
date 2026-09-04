@@ -22,10 +22,13 @@ function deps(stale: Stale, overrides: Partial<ReconcileDeps> = {}): ReconcileDe
     // The default stands in for a row that really was open and really did close:
     // closeSession returns the row it updated. Tests that need the already-closed
     // case override this with a mock returning null.
+    // A stale session that had real playback before the crash: the closed row
+    // carries the watch time accumulated by earlier polls.
     closeSession: vi.fn(async (_db, input) => ({
       userId: "user-1",
       itemId: input.itemId,
       startedAt: STARTED_AT,
+      watchMs: 1_500,
     })),
     applyRollupDelta: vi.fn(async () => {}),
     ...overrides,
@@ -114,6 +117,32 @@ describe("reconcileOpenSessions", () => {
       // that closeSession just recorded.
       watchMs: 0,
     });
+  });
+
+  it("counts no play, and writes no rollup, for a stale session that never accumulated watch time", async () => {
+    const d = deps(
+      [
+        {
+          sessionId: "ps-1",
+          itemId: "item-1",
+          userId: "user-1",
+          positionTicks: 0,
+          lastSeenAt: new Date(NOW - 60_000),
+        },
+      ],
+      {
+        closeSession: vi.fn(async (_db, input) => ({
+          userId: "user-1",
+          itemId: input.itemId,
+          startedAt: STARTED_AT,
+          watchMs: 0,
+        })),
+      },
+    );
+
+    // Still repaired — the row is closed either way — just not credited.
+    expect(await reconcileOpenSessions(d)).toBe(1);
+    expect(d.applyRollupDelta).not.toHaveBeenCalled();
   });
 
   it("writes one rollup delta per repaired session", async () => {

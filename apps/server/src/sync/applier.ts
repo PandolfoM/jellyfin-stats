@@ -123,15 +123,25 @@ export async function applyEvents(
 
         // closeSession returns null if the row was already closed, which is what keeps
         // a replayed end from counting the play twice.
+        //
+        // The play is credited on the row's *total* watch time, not this event's
+        // delta: a session that flapped out of /Sessions and back closes with zero
+        // watch time and is churn, not a viewing — getHistory already omits it, and
+        // counting it here is what made the dashboards' play counts read higher
+        // than history. When there is neither a play nor time to add, no delta is
+        // written at all, so no all-zero rollup row appears to mark the user active.
         if (closed) {
-          await deps.applyRollupDelta(deps.db, {
-            day: utcDay(closed.startedAt.getTime()),
-            userId: closed.userId,
-            itemId,
-            // libraryId omitted: applyRollupDelta resolves it from the items table.
-            playCount: 1,
-            watchMs: event.watchedMs,
-          });
+          const playCount = closed.watchMs > 0 ? 1 : 0;
+          if (playCount > 0 || event.watchedMs > 0) {
+            await deps.applyRollupDelta(deps.db, {
+              day: utcDay(closed.startedAt.getTime()),
+              userId: closed.userId,
+              itemId,
+              // libraryId omitted: applyRollupDelta resolves it from the items table.
+              playCount,
+              watchMs: event.watchedMs,
+            });
+          }
         }
         break;
       }

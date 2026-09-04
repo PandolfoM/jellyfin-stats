@@ -26,14 +26,19 @@ function live(overrides: Partial<LiveSession> = {}): LiveSession {
 
 /** The row the database would return for the session under test. */
 const ROW = { userId: "user-1", itemId: "item-1", startedAt: AT };
+/** What closeSession returns: the same identity plus the row's accumulated watch time. */
+const CLOSED_ROW = { ...ROW, watchMs: 2_000 };
 
-function deps(row: typeof ROW | null = ROW): ApplierDeps {
+function deps(
+  row: typeof ROW | null = ROW,
+  closedRow: typeof CLOSED_ROW | null = row === null ? null : CLOSED_ROW,
+): ApplierDeps {
   return {
     db: {} as ApplierDeps["db"],
     completionThreshold: 0.9,
     openSession: vi.fn(async () => {}),
     touchSession: vi.fn(async () => row),
-    closeSession: vi.fn(async () => row),
+    closeSession: vi.fn(async () => closedRow),
     applyRollupDelta: vi.fn(async () => {}),
     upsertDevice: vi.fn(async () => {}),
   };
@@ -205,6 +210,43 @@ describe("applyEvents", () => {
         playCount: 1,
         watchMs: 2_000,
       }),
+    );
+  });
+
+  it("does not count a play, and writes no rollup at all, when the closed session accumulated no watch time", async () => {
+    // A session that flapped out of /Sessions and straight back closes with zero
+    // watch time — churn, not a viewing. History already omits these rows at
+    // read time; crediting a play here is what made the dashboards' counts
+    // disagree with it.
+    const d = deps(ROW, { ...ROW, watchMs: 0 });
+    const key = snapshotKey("ps-1", "item-1");
+
+    await applyEvents(
+      d,
+      [{ type: "ended", key, positionTicks: 0, watchedMs: 0, at: AT.getTime() }],
+      new Map(),
+    );
+
+    expect(d.closeSession).toHaveBeenCalledTimes(1);
+    expect(d.applyRollupDelta).not.toHaveBeenCalled();
+  });
+
+  it("still credits the final watch delta, without a play, when only that last delta is zero-free", async () => {
+    // Watch time accrued on earlier polls (the row's total is positive) but this
+    // final end event carries none: the play counts, on the row's total, not on
+    // the event's delta.
+    const d = deps(ROW, { ...ROW, watchMs: 30_000 });
+    const key = snapshotKey("ps-1", "item-1");
+
+    await applyEvents(
+      d,
+      [{ type: "ended", key, positionTicks: 95, watchedMs: 0, at: AT.getTime() }],
+      new Map(),
+    );
+
+    expect(d.applyRollupDelta).toHaveBeenCalledWith(
+      d.db,
+      expect.objectContaining({ playCount: 1, watchMs: 0 }),
     );
   });
 
