@@ -11,7 +11,7 @@ import type { LiveSession } from "@jfstats/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as unauthorized from "./unauthorized";
-import { useLiveSessions } from "./useLiveSessions";
+import { LiveSessionsProvider, useLiveSessions } from "./useLiveSessions";
 import { dispatchSessions, FakeEventSource, installFakeEventSource } from "../test/fakeEventSource";
 
 afterEach(() => vi.restoreAllMocks());
@@ -57,7 +57,7 @@ describe("useLiveSessions", () => {
     installFakeEventSource();
     mockAuthMe(() => new Response("{}", { status: 200 }));
 
-    renderHook(() => useLiveSessions());
+    renderHook(() => useLiveSessions(), { wrapper: LiveSessionsProvider });
 
     expect(FakeEventSource.instances).toHaveLength(1);
     expect(FakeEventSource.latest().url).toBe("/api/live");
@@ -67,7 +67,7 @@ describe("useLiveSessions", () => {
     installFakeEventSource();
     mockAuthMe(() => new Response("{}", { status: 200 }));
 
-    const { result } = renderHook(() => useLiveSessions());
+    const { result } = renderHook(() => useLiveSessions(), { wrapper: LiveSessionsProvider });
 
     expect(result.current.connected).toBe(false);
     expect(result.current.sessions).toEqual([]);
@@ -77,7 +77,7 @@ describe("useLiveSessions", () => {
     installFakeEventSource();
     mockAuthMe(() => new Response("{}", { status: 200 }));
 
-    const { result } = renderHook(() => useLiveSessions());
+    const { result } = renderHook(() => useLiveSessions(), { wrapper: LiveSessionsProvider });
     dispatchSessions(FakeEventSource.latest(), [SESSION_A, SESSION_B]);
 
     await waitFor(() => expect(result.current.sessions).toEqual([SESSION_A, SESSION_B]));
@@ -104,7 +104,7 @@ describe("useLiveSessions", () => {
     installFakeEventSource();
     mockAuthMe(() => new Response("{}", { status: 200 }));
 
-    const { result } = renderHook(() => useLiveSessions());
+    const { result } = renderHook(() => useLiveSessions(), { wrapper: LiveSessionsProvider });
     const source = FakeEventSource.latest();
 
     source.dispatchEvent(new MessageEvent("message", { data: JSON.stringify([SESSION_A]) }));
@@ -118,7 +118,7 @@ describe("useLiveSessions", () => {
     installFakeEventSource();
     mockAuthMe(() => new Response("{}", { status: 200 }));
 
-    const { unmount } = renderHook(() => useLiveSessions());
+    const { unmount } = renderHook(() => useLiveSessions(), { wrapper: LiveSessionsProvider });
     const source = FakeEventSource.latest();
     expect(source.close).not.toHaveBeenCalled();
 
@@ -131,7 +131,7 @@ describe("useLiveSessions", () => {
     installFakeEventSource();
     mockAuthMe(() => new Response("{}", { status: 200 }));
 
-    const { result } = renderHook(() => useLiveSessions());
+    const { result } = renderHook(() => useLiveSessions(), { wrapper: LiveSessionsProvider });
     const source = FakeEventSource.latest();
     dispatchSessions(source, [SESSION_A]);
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -150,7 +150,7 @@ describe("useLiveSessions", () => {
     installFakeEventSource();
     mockAuthMe(() => new Response("{}", { status: 200 }));
 
-    const { result } = renderHook(() => useLiveSessions());
+    const { result } = renderHook(() => useLiveSessions(), { wrapper: LiveSessionsProvider });
     const source = FakeEventSource.latest();
     dispatchSessions(source, [SESSION_A]);
     await waitFor(() => expect(result.current.connected).toBe(true));
@@ -168,7 +168,7 @@ describe("useLiveSessions", () => {
       const notifySpy = vi.spyOn(unauthorized, "notifyUnauthorized");
       mockAuthMe(() => new Response(JSON.stringify({ error: "unauthenticated" }), { status: 401 }));
 
-      renderHook(() => useLiveSessions());
+      renderHook(() => useLiveSessions(), { wrapper: LiveSessionsProvider });
       FakeEventSource.latest().dispatchEvent(new Event("error"));
 
       await waitFor(() => expect(notifySpy).toHaveBeenCalledTimes(1));
@@ -184,7 +184,7 @@ describe("useLiveSessions", () => {
           }),
       );
 
-      renderHook(() => useLiveSessions());
+      renderHook(() => useLiveSessions(), { wrapper: LiveSessionsProvider });
       FakeEventSource.latest().dispatchEvent(new Event("error"));
 
       await waitFor(() => expect(fetchMock).toHaveBeenCalled());
@@ -204,7 +204,7 @@ describe("useLiveSessions", () => {
         }),
       );
 
-      renderHook(() => useLiveSessions());
+      renderHook(() => useLiveSessions(), { wrapper: LiveSessionsProvider });
       FakeEventSource.latest().dispatchEvent(new Event("error"));
 
       // Nothing to waitFor on a promise that only ever rejects into a no-op;
@@ -219,7 +219,7 @@ describe("useLiveSessions", () => {
       installFakeEventSource();
       const fetchMock = mockAuthMe(() => new Response("{}", { status: 200 }));
 
-      renderHook(() => useLiveSessions());
+      renderHook(() => useLiveSessions(), { wrapper: LiveSessionsProvider });
       const source = FakeEventSource.latest();
 
       source.dispatchEvent(new Event("error"));
@@ -228,5 +228,29 @@ describe("useLiveSessions", () => {
       source.dispatchEvent(new Event("error"));
       await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     });
+  });
+
+  it("shares one EventSource between every consumer under the same provider", () => {
+    installFakeEventSource();
+    mockAuthMe(() => new Response("{}", { status: 200 }));
+
+    // Two hooks — the sidebar indicator and the Live page, in production —
+    // must not mean two server-side streams.
+    renderHook(
+      () => {
+        useLiveSessions();
+        return useLiveSessions();
+      },
+      { wrapper: LiveSessionsProvider },
+    );
+
+    expect(FakeEventSource.instances).toHaveLength(1);
+  });
+
+  it("throws a clear error when used outside the provider, rather than silently reporting nothing", () => {
+    installFakeEventSource();
+    mockAuthMe(() => new Response("{}", { status: 200 }));
+
+    expect(() => renderHook(() => useLiveSessions())).toThrow(/LiveSessionsProvider/);
   });
 });

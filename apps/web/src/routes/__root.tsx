@@ -1,7 +1,8 @@
 import { Navigate, Outlet, createRootRoute, useRouterState } from "@tanstack/react-router";
 
+import { LiveSessionsProvider, useLiveSessions } from "../api/useLiveSessions";
 import { useSession } from "../auth/session";
-import { AppShell } from "../components/domain/AppShell";
+import { AppShell, type AppShellProps } from "../components/domain/AppShell";
 import { CustomCssStyle } from "../components/domain/CustomCssStyle";
 import { Skeleton } from "../components/ui/skeleton";
 
@@ -37,6 +38,21 @@ function SessionErrorState() {
     >
       Could not reach the server. Try refreshing the page.
     </div>
+  );
+}
+
+/**
+ * The signed-in frame. Split out of RootComponent so the live feed can be
+ * read *inside* `LiveSessionsProvider` — a hook cannot consume a context its
+ * own component provides. A dropped feed shows no dot rather than a stale
+ * one: "nothing is playing" is the honest reading of "we can't tell".
+ */
+function SignedInShell({ userName, onLogout, children }: Omit<AppShellProps, "liveCount">) {
+  const { sessions, connected } = useLiveSessions();
+  return (
+    <AppShell userName={userName} onLogout={onLogout} liveCount={connected ? sessions.length : 0}>
+      {children}
+    </AppShell>
   );
 }
 
@@ -81,16 +97,20 @@ function RootComponent() {
   }
 
   return (
-    <AppShell userName={session.user.userName} onLogout={() => void session.logout()}>
-      {/* Mounted here rather than inside AppShell, and only past every early
-          return above — so the operator's stylesheet reaches the dashboard but
-          never the login screen or the session error state. A rule that hides
-          everything therefore cannot stop anyone signing back in to clear it.
-          Keeping it out of AppShell also leaves that component props-only,
-          with no query of its own. */}
-      <CustomCssStyle />
-      <Outlet />
-    </AppShell>
+    // The live feed is opened here, once, for the whole signed-in app — past
+    // every early return above, so an anonymous visitor never holds a stream.
+    <LiveSessionsProvider>
+      <SignedInShell userName={session.user.userName} onLogout={() => void session.logout()}>
+        {/* Mounted here rather than inside AppShell, and only past every early
+            return above — so the operator's stylesheet reaches the dashboard but
+            never the login screen or the session error state. A rule that hides
+            everything therefore cannot stop anyone signing back in to clear it.
+            Keeping it out of AppShell also leaves that component props-only,
+            with no query of its own. */}
+        <CustomCssStyle />
+        <Outlet />
+      </SignedInShell>
+    </LiveSessionsProvider>
   );
 }
 
