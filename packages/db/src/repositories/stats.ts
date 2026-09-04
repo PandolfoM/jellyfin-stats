@@ -252,7 +252,10 @@ export async function getUserDetail(
   if (row === undefined) return null;
 
   // Device breakdown comes from the session table — it is per-user and small,
-  // and the rollup deliberately does not carry device identity.
+  // and the rollup deliberately does not carry device identity. It must count
+  // by the rollup's rule, though: an ended session *with watch time*. Sessions
+  // that flapped closed with none are churn the rollup (and history) omit, and
+  // counting them here put "Chrome: 75 plays" under a header that said 16.
   const devices = await db.execute<{ device_id: string; name: string; plays: string }>(sql`
     SELECT
       s.device_id                        AS device_id,
@@ -262,6 +265,7 @@ export async function getUserDetail(
     LEFT JOIN devices d ON d.id = s.device_id
     WHERE s.user_id = ${userId}
       AND s.ended_at IS NOT NULL
+      AND s.watch_ms > 0
       AND (s.started_at AT TIME ZONE 'UTC')::date >= ${range.from}::date
       AND (s.started_at AT TIME ZONE 'UTC')::date <= ${range.to}::date
       AND s.device_id IS NOT NULL

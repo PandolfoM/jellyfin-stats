@@ -1,6 +1,13 @@
 import { sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { items, jellyfinUsers, libraries, playbackRollupDaily } from "../schema.js";
+import {
+  devices,
+  items,
+  jellyfinUsers,
+  libraries,
+  playbackRollupDaily,
+  playbackSessions,
+} from "../schema.js";
 import { stopTestDatabase, withTestDatabase } from "../testing/harness.js";
 import {
   getLibraryStats,
@@ -412,6 +419,43 @@ describe("getUserDetail", () => {
       await seed(db);
 
       expect(await getUserDetail(db, "nobody", RANGE)).toBeNull();
+    });
+  });
+
+  it("counts a device's plays by the same rule as the play total: ended sessions with watch time", async () => {
+    await withTestDatabase(async (db) => {
+      await seed(db);
+      await db.insert(devices).values([
+        { id: "dev-chrome", name: "Chrome" },
+        { id: "dev-phone", name: "iPhone" },
+      ]);
+      const at = new Date("2026-08-10T20:00:00Z");
+      const session = (sessionId: string, deviceId: string, watchMs: number, ended = true) => ({
+        sessionId,
+        userId: "user-a",
+        itemId: "item-1",
+        deviceId,
+        startedAt: at,
+        lastSeenAt: at,
+        endedAt: ended ? new Date(at.getTime() + 60_000) : null,
+        watchMs,
+      });
+      await db.insert(playbackSessions).values([
+        session("s-1", "dev-chrome", 60_000),
+        session("s-2", "dev-chrome", 30_000),
+        // Flapped sessions: closed with no watch time. The rollup does not count
+        // these as plays (applier, reconcile, recompute all agree), so the device
+        // breakdown must not either — otherwise "Chrome: 75 plays" sits under a
+        // header that says 16.
+        session("s-3", "dev-chrome", 0),
+        session("s-4", "dev-phone", 0),
+        // Still open: not a play yet, on any path.
+        session("s-5", "dev-phone", 5_000, false),
+      ]);
+
+      const detail = await getUserDetail(db, "user-a", RANGE);
+
+      expect(detail?.devices).toEqual([{ deviceId: "dev-chrome", name: "Chrome", plays: 2 }]);
     });
   });
 
