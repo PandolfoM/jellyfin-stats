@@ -10,6 +10,7 @@ import {
   rollupWindow,
   runDueJobs,
   startScheduler,
+  triggerJob,
   type SchedulerDeps,
 } from "./scheduler.js";
 import { JOB_NAMES, type JobName, type Schedule } from "./sync/schedule.js";
@@ -742,5 +743,103 @@ describe("startScheduler tick timing (finding 3)", () => {
     // not the ~5s (a whole extra interval) the old tickMs === everyMs config
     // produced in the test above.
     expect(pollCallsAtSevenTicks).toBe(2);
+  });
+});
+
+describe("triggerJob", () => {
+  function depsWith(runJob: SchedulerDeps["runJob"]) {
+    const writeRun = vi.fn().mockResolvedValue(undefined);
+    const inFlight = new Map<JobName, Promise<void>>();
+    const deps: SchedulerDeps = {
+      schedules: NEVER_DUE_SCHEDULES,
+      runJob,
+      writeRun,
+      logger: fakeLogger(),
+      inFlight,
+      lastAttemptAt: new Map(),
+      startIndex: 0,
+    };
+    return { deps, writeRun, inFlight };
+  }
+
+  it("starts the job immediately even though its schedule says it is not due, and records the run on success", async () => {
+    const runJob = vi.fn(async () => {});
+    const { deps, writeRun, inFlight } = depsWith(runJob);
+
+    expect(triggerJob(deps, "item-sync", FIXED_NOW)).toBe("started");
+    await waitUntilIdle(inFlight, "item-sync");
+
+    expect(runJob).toHaveBeenCalledWith("item-sync");
+    expect(writeRun).toHaveBeenCalledWith("item-sync", new Date(FIXED_NOW));
+  });
+
+  it("reports already_running and does not start a second copy while the same job is in flight", async () => {
+    let resolveJob: (() => void) | undefined;
+    const pending = new Promise<void>((resolve) => {
+      resolveJob = resolve;
+    });
+    const runJob = vi.fn(() => pending);
+    const { deps, inFlight } = depsWith(runJob);
+
+    expect(triggerJob(deps, "item-sync", FIXED_NOW)).toBe("started");
+    expect(triggerJob(deps, "item-sync", FIXED_NOW)).toBe("already_running");
+    expect(runJob).toHaveBeenCalledTimes(1);
+
+    resolveJob?.();
+    await waitUntilIdle(inFlight, "item-sync");
+  });
+
+  it("ignores the failure backoff a scheduled run would respect — a manual retry is the point", async () => {
+    const runJob = vi.fn(async () => {});
+    const { deps } = depsWith(runJob);
+    deps.lastAttemptAt.set("item-sync", FIXED_NOW - 1_000);
+
+    expect(triggerJob(deps, "item-sync", FIXED_NOW)).toBe("started");
+    expect(runJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs a failure and does not record a run, the same as a scheduled run", async () => {
+    const runJob = vi.fn(async () => {
+      throw new Error("jellyfin down");
+    });
+    const { deps, writeRun, inFlight } = depsWith(runJob);
+
+    triggerJob(deps, "item-sync", FIXED_NOW);
+    await waitUntilIdle(inFlight, "item-sync");
+
+    expect(writeRun).not.toHaveBeenCalled();
+    expect(deps.logger.error).toHaveBeenCalled();
+  });
+});
+
+describe("startScheduler manual trigger", () => {
+  it("exposes triggerJob and isRunning on the handle", async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveJob: (() => void) | undefined;
+      const pending = new Promise<void>((resolve) => {
+        resolveJob = resolve;
+      });
+      const runJob = vi.fn(() => pending);
+      const context = {
+        env: { SESSION_POLL_INTERVAL_MS: 5000, REFERENCE_SYNC_INTERVAL_MS: 900_000 },
+        logger: fakeLogger(),
+      } as unknown as AppContext;
+      const scheduler = startScheduler(context, {
+        runJob,
+        readRuns: async () => new Map(),
+        writeRun: async () => {},
+      });
+
+      expect(scheduler.isRunning("item-sync")).toBe(false);
+      expect(scheduler.triggerJob("item-sync")).toBe("started");
+      expect(scheduler.isRunning("item-sync")).toBe(true);
+
+      resolveJob?.();
+      await scheduler.stop();
+      expect(scheduler.isRunning("item-sync")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
