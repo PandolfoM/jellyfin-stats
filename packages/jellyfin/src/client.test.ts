@@ -25,7 +25,7 @@ function clientWith(payload: unknown, status = 200) {
 
 /** Routes requests by substring match against the URL, for endpoints (like getItems)
  * that issue more than one request per call. */
-function clientWithRoutes(routes: Array<[path: string, payload: unknown]>) {
+function clientWithRoutes(routes: Array<[path: string, payload: unknown, status?: number]>) {
   const fetchMock = vi.fn<typeof fetch>(async (input) => {
     const url = String(input);
     const match = routes.find(([path]) => url.includes(path));
@@ -33,7 +33,7 @@ function clientWithRoutes(routes: Array<[path: string, payload: unknown]>) {
       throw new Error(`Unhandled request in test: ${url}`);
     }
     return new Response(JSON.stringify(match[1]), {
-      status: 200,
+      status: match[2] ?? 200,
       headers: { "content-type": "application/json" },
     });
   });
@@ -208,5 +208,117 @@ describe("createJellyfinClient", () => {
     expect(movieItem?.seriesName).toBeNull();
     expect(movieItem?.seasonNumber).toBeNull();
     expect(movieItem?.episodeNumber).toBeNull();
+  });
+});
+
+describe("getItem", () => {
+  const ITEM_ID = "33333333333333333333333333333333";
+  // The administrator in users.json — the user context the lookup should run as.
+  const ADMIN_USER_ID = "11111111111111111111111111111111";
+  const itemPayload = {
+    Id: ITEM_ID,
+    Name: "Test Movie",
+    Type: "Movie",
+    Overview: "A film about testing.",
+    PremiereDate: "2019-05-17T00:00:00.0000000Z",
+    ProductionYear: 2019,
+    RunTimeTicks: 72_000_000_000,
+    Genres: ["Drama", "Comedy"],
+    OfficialRating: "PG-13",
+    CommunityRating: 7.4,
+    Studios: [{ Name: "Test Studios", Id: "s1" }],
+    ImageTags: { Primary: "img-tag" },
+  };
+
+  function itemClient(payload: unknown = itemPayload, status = 200) {
+    return clientWithRoutes([
+      ["/Users", usersFixture],
+      [`/Items/${ITEM_ID}`, payload, status],
+    ]);
+  }
+
+  it("scopes the single-item lookup to an administrator's userId, since 10.11 rejects a bare API-key lookup with 400", async () => {
+    const { client, fetchMock } = itemClient();
+
+    await client.getItem(ITEM_ID);
+
+    const itemCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/Items/"));
+    expect(String(itemCall?.[0])).toBe(
+      `http://jellyfin.test:8096/Items/${ITEM_ID}?userId=${ADMIN_USER_ID}`,
+    );
+  });
+
+  it("looks the user context up once and reuses it across calls", async () => {
+    const { client, fetchMock } = itemClient();
+
+    await client.getItem(ITEM_ID);
+    await client.getItem(ITEM_ID);
+
+    const userCalls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/Users"));
+    expect(userCalls).toHaveLength(1);
+  });
+
+  it("maps the metadata fields the detail page shows", async () => {
+    const { client } = itemClient();
+
+    const item = await client.getItem(ITEM_ID);
+
+    expect(item).toEqual({
+      id: ITEM_ID,
+      name: "Test Movie",
+      type: "Movie",
+      seriesId: null,
+      seriesName: null,
+      seasonNumber: null,
+      episodeNumber: null,
+      overview: "A film about testing.",
+      premiereDate: "2019-05-17",
+      productionYear: 2019,
+      runtimeTicks: 72_000_000_000,
+      genres: ["Drama", "Comedy"],
+      officialRating: "PG-13",
+      communityRating: 7.4,
+      studios: ["Test Studios"],
+      imageTag: "img-tag",
+    });
+  });
+
+  it("returns null fields and empty lists when Jellyfin omits optional metadata", async () => {
+    const { client } = itemClient({ Id: ITEM_ID, Name: "Bare", Type: "Audio" });
+
+    const item = await client.getItem(ITEM_ID);
+
+    expect(item).toMatchObject({
+      overview: null,
+      premiereDate: null,
+      productionYear: null,
+      runtimeTicks: null,
+      genres: [],
+      officialRating: null,
+      communityRating: null,
+      studios: [],
+      imageTag: null,
+    });
+  });
+
+  it("returns null for a 404 rather than throwing, so a deleted item is not a server fault", async () => {
+    const { client } = itemClient({ error: "not found" }, 404);
+
+    await expect(client.getItem(ITEM_ID)).resolves.toBeNull();
+  });
+
+  it("still throws on other failures", async () => {
+    const { client } = itemClient({ error: "boom" }, 500);
+
+    await expect(client.getItem(ITEM_ID)).rejects.toThrow(/500/);
+  });
+
+  it("throws when Jellyfin has no users to scope the lookup to", async () => {
+    const { client } = clientWithRoutes([
+      ["/Users", []],
+      [`/Items/${ITEM_ID}`, itemPayload],
+    ]);
+
+    await expect(client.getItem(ITEM_ID)).rejects.toThrow(/no users/i);
   });
 });

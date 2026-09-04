@@ -61,6 +61,22 @@ export const librarySchema = z.object({
 
 export const librariesSchema = z.array(librarySchema);
 
+/**
+ * The single-item endpoint (`/Items/{id}`) returns the full BaseItemDto, so the
+ * descriptive fields the detail page wants arrive without any `Fields=` opt-in.
+ * Every one of them is optional: Jellyfin omits what it does not know, and a
+ * bare audio track or a freshly scanned file can lack all of them.
+ */
+export const itemDetailSchema = nowPlayingItemSchema.extend({
+  Overview: z.string().nullish(),
+  // ISO timestamp; only the calendar date is meaningful (Jellyfin stores it at midnight).
+  PremiereDate: z.string().nullish(),
+  Genres: z.array(z.string()).nullish(),
+  OfficialRating: z.string().nullish(),
+  CommunityRating: z.number().nullish(),
+  Studios: z.array(z.object({ Name: z.string().nullish() })).nullish(),
+});
+
 export const itemsSchema = z.object({
   // No "library id" field exists on an item — an item's ParentId is its immediate
   // parent (season for an episode, collection folder for a movie), not the library

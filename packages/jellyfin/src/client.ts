@@ -7,6 +7,7 @@ import {
   type JellyfinAuthResult,
 } from "./auth.js";
 import {
+  itemDetailSchema,
   itemsSchema,
   librariesSchema,
   normalisePlayMethod,
@@ -52,11 +53,34 @@ export interface JellyfinItem {
   imageTag: string | null;
 }
 
+/** Descriptive metadata for one item, fetched live for the item detail page. */
+export interface JellyfinItemDetail {
+  id: string;
+  name: string;
+  type: string;
+  seriesId: string | null;
+  seriesName: string | null;
+  seasonNumber: number | null;
+  episodeNumber: number | null;
+  overview: string | null;
+  /** `YYYY-MM-DD`, or null when Jellyfin has no premiere date for the item. */
+  premiereDate: string | null;
+  productionYear: number | null;
+  runtimeTicks: number | null;
+  genres: string[];
+  officialRating: string | null;
+  communityRating: number | null;
+  studios: string[];
+  imageTag: string | null;
+}
+
 export interface JellyfinClient {
   getSessions(): Promise<LiveSession[]>;
   getUsers(): Promise<JellyfinUser[]>;
   getLibraries(): Promise<JellyfinLibrary[]>;
   getItems(): Promise<JellyfinItem[]>;
+  /** Null when Jellyfin answers 404 � the item was deleted upstream. */
+  getItem(itemId: string): Promise<JellyfinItemDetail | null>;
   authenticateByName(username: string, password: string): Promise<JellyfinAuthResult>;
   revokeToken(accessToken: string): Promise<void>;
 }
@@ -65,8 +89,8 @@ export function createJellyfinClient(options: JellyfinClientOptions): JellyfinCl
   const doFetch = options.fetch ?? fetch;
   const timeoutMs = options.timeoutMs ?? 15_000;
 
-  async function request<S extends z.ZodTypeAny>(path: string, schema: S): Promise<z.infer<S>> {
-    const response = await doFetch(`${options.baseUrl}${path}`, {
+  async function fetchJson(path: string): Promise<Response> {
+    return doFetch(`${options.baseUrl}${path}`, {
       headers: {
         // The key goes in a header, never the query string, so it cannot leak
         // into access logs or browser history.
@@ -75,7 +99,13 @@ export function createJellyfinClient(options: JellyfinClientOptions): JellyfinCl
       },
       signal: AbortSignal.timeout(timeoutMs),
     });
+  }
 
+  async function parseResponse<S extends z.ZodTypeAny>(
+    path: string,
+    response: Response,
+    schema: S,
+  ): Promise<z.infer<S>> {
     if (!response.ok) {
       throw new Error(`Jellyfin request failed: ${response.status} ${path}`);
     }
@@ -87,6 +117,68 @@ export function createJellyfinClient(options: JellyfinClientOptions): JellyfinCl
     }
 
     return parsed.data;
+  }
+
+  async function request<S extends z.ZodTypeAny>(path: string, schema: S): Promise<z.infer<S>> {
+    return parseResponse(path, await fetchJson(path), schema);
+  }
+
+  // Jellyfin 10.11 answers `GET /Items/{id}` with a bare 400 ("Error
+  // processing request.") when the request carries only an API key and no
+  // user context; the same request with `?userId=` succeeds. The key is
+  // server-wide, so any real user id works as that context — an
+  // administrator is chosen so a per-user library restriction can never hide
+  // an item. Resolved once and reused: the id is stable for the life of the
+  // process and a /Users round-trip per detail page would be pure overhead.
+  // Dropped again on a failed lookup so a deleted user is re-resolved next
+  // time rather than poisoning every later call.
+  let itemContextUserId: string | null = null;
+
+  async function resolveItemContextUserId(): Promise<string> {
+    if (itemContextUserId !== null) return itemContextUserId;
+
+    const users = await getUsers();
+    const chosen = users.find((user) => user.isAdmin) ?? users[0];
+    if (chosen === undefined) {
+      throw new Error("Jellyfin reports no users; cannot scope an item lookup");
+    }
+
+    itemContextUserId = chosen.id;
+    return chosen.id;
+  }
+
+  async function getItem(itemId: string): Promise<JellyfinItemDetail | null> {
+    const userId = await resolveItemContextUserId();
+    const path = `/Items/${encodeURIComponent(itemId)}?userId=${encodeURIComponent(userId)}`;
+    const response = await fetchJson(path);
+
+    if (!response.ok && response.status !== 404) itemContextUserId = null;
+
+    // A deleted item is an ordinary answer for the detail page ("no longer in
+    // Jellyfin"), not a server fault, so it must not surface as a thrown error
+    // the way every other non-2xx does.
+    if (response.status === 404) return null;
+
+    const raw = await parseResponse(path, response, itemDetailSchema);
+
+    return {
+      id: raw.Id,
+      name: raw.Name,
+      type: raw.Type,
+      seriesId: raw.SeriesId ?? null,
+      seriesName: raw.SeriesName ?? null,
+      seasonNumber: raw.ParentIndexNumber ?? null,
+      episodeNumber: raw.IndexNumber ?? null,
+      overview: raw.Overview ?? null,
+      premiereDate: raw.PremiereDate ? raw.PremiereDate.slice(0, 10) : null,
+      productionYear: raw.ProductionYear ?? null,
+      runtimeTicks: raw.RunTimeTicks ?? null,
+      genres: raw.Genres ?? [],
+      officialRating: raw.OfficialRating ?? null,
+      communityRating: raw.CommunityRating ?? null,
+      studios: (raw.Studios ?? []).flatMap((studio) => (studio.Name ? [studio.Name] : [])),
+      imageTag: raw.ImageTags?.Primary ?? null,
+    };
   }
 
   async function getSessions(): Promise<LiveSession[]> {
@@ -240,5 +332,13 @@ export function createJellyfinClient(options: JellyfinClientOptions): JellyfinCl
     }
   }
 
-  return { getSessions, getUsers, getLibraries, getItems, authenticateByName, revokeToken };
+  return {
+    getSessions,
+    getUsers,
+    getLibraries,
+    getItems,
+    getItem,
+    authenticateByName,
+    revokeToken,
+  };
 }

@@ -3,6 +3,7 @@ export {
   type JellyfinClient,
   type JellyfinClientOptions,
   type JellyfinItem,
+  type JellyfinItemDetail,
   type JellyfinLibrary,
   type JellyfinUser,
 } from "./client.js";
