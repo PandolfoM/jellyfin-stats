@@ -145,3 +145,16 @@ export function formatRelativeTime(iso: string, now: number = Date.now()): strin
   const days = Math.floor(elapsed / DAY_MS);
   return days === 1 ? "1 day ago" : `${days} days ago`;
 }
+
+/**
+ * "Ada Lovelace" → "AL", "grace" → "G", "" → "?" — the fallback an avatar
+ * shows when Jellyfin has no image for the user. First and last words only,
+ * so a long display name still yields two letters.
+ */
+export function initialsFor(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  const first = words[0]?.[0];
+  if (first === undefined) return "?";
+  const last = words.length > 1 ? words[words.length - 1]?.[0] : undefined;
+  return `${first}${last ?? ""}`.toUpperCase();
+}

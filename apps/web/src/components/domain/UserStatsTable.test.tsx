@@ -113,3 +113,15 @@ describe("UserStatsTable", () => {
     expect(link).toHaveAttribute("href", "/users/user-active-1");
   });
 });
+
+describe("UserStatsTable avatars", () => {
+  it("shows each user's avatar beside their name", async () => {
+    renderWithRouter(USERS);
+
+    expect(await screen.findByRole("img", { name: "Avatar for Ada Lovelace" })).toHaveAttribute(
+      "src",
+      expect.stringContaining(`/api/images/users/${ACTIVE_USER.userId}`),
+    );
+    expect(screen.getByRole("img", { name: "Avatar for Grace Hopper" })).toBeInTheDocument();
+  });
+});

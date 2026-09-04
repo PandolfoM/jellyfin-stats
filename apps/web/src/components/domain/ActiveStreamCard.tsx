@@ -6,6 +6,7 @@ import { formatDuration, ticksToMs } from "../../lib/format";
 import { Badge } from "../ui/badge";
 import { Card, CardContent } from "../ui/card";
 import { PosterImage } from "./PosterImage";
+import { UserAvatar } from "./UserAvatar";
 
 export interface ActiveStreamCardProps {
   session: LiveSession;
@@ -70,8 +71,11 @@ export function ActiveStreamCard({ session, variant }: ActiveStreamCardProps) {
             >
               {session.itemName}
             </Link>
-            <span className="truncate text-xs text-muted-foreground">
-              {session.userName} · {session.deviceName}
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <UserAvatar userId={session.userId} name={session.userName} className="size-5" />
+              <span className="truncate">
+                {session.userName} · {session.deviceName}
+              </span>
             </span>
             {!isCompact && (
               <div className="flex flex-wrap items-center gap-1.5 pt-1">

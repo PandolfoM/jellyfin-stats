@@ -8,6 +8,7 @@ import {
   formatPercent,
   formatFullDate,
   formatRelativeTime,
+  initialsFor,
   ticksToMs,
 } from "./format";
 
@@ -241,5 +242,18 @@ describe("formatRelativeTime", () => {
 
   it("returns a dash for an unparseable instant", () => {
     expect(formatRelativeTime("not a date", NOW)).toBe("—");
+  });
+});
+
+describe("initialsFor", () => {
+  it("takes the first letter of the first and last words, upper-cased", () => {
+    expect(initialsFor("Ada Lovelace")).toBe("AL");
+    expect(initialsFor("grace brewster murray hopper")).toBe("GH");
+  });
+
+  it("uses one letter for a single word and a question mark for nothing usable", () => {
+    expect(initialsFor("grace")).toBe("G");
+    expect(initialsFor("")).toBe("?");
+    expect(initialsFor("   ")).toBe("?");
   });
 });

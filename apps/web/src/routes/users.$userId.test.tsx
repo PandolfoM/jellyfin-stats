@@ -297,4 +297,25 @@ describe("User detail route", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
     expect(screen.queryByTestId("user-detail-not-found")).not.toBeInTheDocument();
   });
+
+  it("shows the user's avatar in the page header", async () => {
+    mockFetch({
+      detail: (userId) =>
+        jsonResponse({
+          userId,
+          name: "Ada Lovelace",
+          isAdmin: false,
+          plays: 0,
+          watchMs: 0,
+          devices: [],
+        }),
+    });
+
+    renderApp("/users/user-alpha-1");
+
+    expect(await screen.findByRole("img", { name: "Avatar for Ada Lovelace" })).toHaveAttribute(
+      "src",
+      expect.stringContaining("/api/images/users/user-alpha-1"),
+    );
+  });
 });

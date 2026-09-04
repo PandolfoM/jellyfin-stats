@@ -6,6 +6,7 @@ import { Badge } from "../ui/badge";
 import { Skeleton } from "../ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { EmptyState } from "./EmptyState";
+import { UserAvatar } from "./UserAvatar";
 
 export interface UserStatsTableProps {
   users: UserStatsResponse;
@@ -59,13 +60,18 @@ export function UserStatsTable({ users, loading }: UserStatsTableProps) {
         {users.map((user) => (
           <TableRow key={user.userId} data-testid="user-stats-row">
             <TableCell className="font-medium text-foreground">
-              <Link
-                to="/users/$userId"
-                params={{ userId: user.userId }}
-                className="hover:underline focus-visible:underline"
-              >
-                {user.name}
-              </Link>
+              {/* The avatar sits beside the link, not inside it, so the link's
+                  accessible name stays the user's name alone. */}
+              <span className="inline-flex items-center gap-2">
+                <UserAvatar userId={user.userId} name={user.name} />
+                <Link
+                  to="/users/$userId"
+                  params={{ userId: user.userId }}
+                  className="hover:underline focus-visible:underline"
+                >
+                  {user.name}
+                </Link>
+              </span>
             </TableCell>
             <TableCell>{user.isAdmin && <Badge variant="secondary">Admin</Badge>}</TableCell>
             <TableCell className="text-right">{formatCount(user.plays)}</TableCell>

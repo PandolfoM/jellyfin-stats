@@ -5,6 +5,7 @@ import { formatDateTime, formatDuration, formatEpisodeLabel } from "../../lib/fo
 import { Badge } from "../ui/badge";
 import { Skeleton } from "../ui/skeleton";
 import { EmptyState } from "./EmptyState";
+import { UserAvatar } from "./UserAvatar";
 
 // There is no standalone `HistoryRow` export from queries.ts — the history
 // endpoint's response is `{ rows, total }` — so this is derived from the one
@@ -84,6 +85,7 @@ export function ActivityFeed({ rows, loading }: ActivityFeedProps) {
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-2 sm:justify-self-center">
+            <UserAvatar userId={row.userId} name={row.userName} />
             <span className="text-muted-foreground">{row.userName}</span>
           </div>
           <div className="flex shrink-0 items-center gap-2 sm:justify-self-end">
