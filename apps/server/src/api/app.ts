@@ -99,6 +99,24 @@ export function createImageFetcher(
   };
 }
 
+/**
+ * The avatar counterpart of createImageFetcher: `/Users/{id}/Images/Primary`.
+ * Same encoding rule and same header-only key, for the same reasons.
+ */
+export function createUserImageFetcher(
+  env: Pick<AppEnv, "JELLYFIN_URL" | "JELLYFIN_API_KEY">,
+): ImageDeps["fetchUserImage"] {
+  return async (userId, options) => {
+    const url = new URL(`${env.JELLYFIN_URL}/Users/${encodeURIComponent(userId)}/Images/Primary`);
+    url.searchParams.set("maxWidth", String(options.maxWidth));
+
+    return fetch(url, {
+      headers: { Authorization: `MediaBrowser Token="${env.JELLYFIN_API_KEY}"` },
+      signal: AbortSignal.timeout(15_000),
+    });
+  };
+}
+
 // No explicit return-type interface on createApp below — an annotation there
 // would erase the richer, chained route schema that registerAuthRoutes (and
 // every registerXRoutes call threaded after it) hands back (an annotated
@@ -231,6 +249,7 @@ export function createApp(context: AppContext, options: CreateAppOptions = {}) {
 
   const imagesApp = registerImageRoutes(settingsApp, {
     fetchImage: createImageFetcher(context.env),
+    fetchUserImage: createUserImageFetcher(context.env),
   });
 
   const itemsApp = registerItemRoutes(imagesApp, {
