@@ -8,11 +8,13 @@ import {
   getUserStats,
   getSetting,
   getWatchTimeSeries,
+  readJobRuns,
   setSetting,
 } from "@jfstats/db";
 import type { AppEnv } from "@jfstats/shared";
 import { Hono } from "hono";
 import type { AppContext } from "../context.js";
+import type { SchedulerHandle } from "../scheduler.js";
 import type { SnapshotStore } from "../sync/snapshot-store.js";
 import { requireAdmin } from "./middleware/auth.js";
 import { createRateLimiter } from "./rate-limit.js";
@@ -104,8 +106,19 @@ export function createImageFetcher(
 // AppType is derived from the real return value instead, so `hc<AppType>` on
 // the web side sees every /api/* route registered below rather than
 // resolving to `unknown`.
-export function createApp(context: AppContext) {
+export interface CreateAppOptions {
+  /**
+   * The running scheduler, so Settings can trigger an item sync on demand
+   * and report whether one is running. Optional because the scheduler is
+   * started by `startApp` (main.ts), not here, and tests build the app
+   * without one — the sync endpoint then reports itself unavailable.
+   */
+  scheduler?: SchedulerHandle;
+}
+
+export function createApp(context: AppContext, options: CreateAppOptions = {}) {
   const app = new Hono<{ Variables: AppVariables }>();
+  const { scheduler } = options;
 
   app.get("/api/health", (c) => c.json({ status: "ok" }));
 
@@ -206,6 +219,14 @@ export function createApp(context: AppContext) {
     jellyfinUrl: context.env.JELLYFIN_URL,
     getCustomCss: () => getSetting(context.db, "custom_css"),
     saveCustomCss: (css) => setSetting(context.db, "custom_css", css),
+    sync:
+      scheduler === undefined
+        ? null
+        : {
+            trigger: () => scheduler.triggerJob("item-sync"),
+            isRunning: () => scheduler.isRunning("item-sync"),
+            lastRunAt: async () => (await readJobRuns(context.db)).get("item-sync") ?? null,
+          },
   });
 
   const imagesApp = registerImageRoutes(settingsApp, {

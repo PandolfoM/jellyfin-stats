@@ -146,6 +146,17 @@ describe("createApp", () => {
     expect(response.status).toBe(401);
   });
 
+  it("rejects an unauthenticated sync trigger", async () => {
+    // A POST beneath /api/settings — covered by the wildcard gate, and pinned
+    // here so removing that line cannot silently expose a Jellyfin-hitting job
+    // to anyone who can reach the port.
+    const { app } = createApp(testContext());
+
+    const response = await app.request("/api/settings/sync-now", { method: "POST" });
+
+    expect(response.status).toBe(401);
+  });
+
   it("rejects an unauthenticated request to /api/settings", async () => {
     // Proves requireAdmin is actually mounted ahead of this route, not just
     // written somewhere in the file — the effective sync intervals and

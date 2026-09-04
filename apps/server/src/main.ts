@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createApp } from "./api/app.js";
 import type { LiveStreamRegistry } from "./api/routes/live.js";
 import { closeContext, createContext, type AppContext } from "./context.js";
-import { startScheduler } from "./scheduler.js";
+import { startScheduler, type SchedulerHandle } from "./scheduler.js";
 import { createShutdownHandler } from "./shutdown.js";
 import { reconcileOpenSessions } from "./sync/reconcile.js";
 
@@ -71,7 +71,7 @@ const defaultStartAppDeps: StartAppDeps = {
 };
 
 export interface StartedApp {
-  scheduler: { stop(): Promise<void> };
+  scheduler: SchedulerHandle;
   server: ServerType;
   liveStreams: LiveStreamRegistry;
 }
@@ -114,7 +114,9 @@ export async function startApp(
   context.logger.info({ repaired }, "startup reconciliation complete");
 
   const scheduler = deps.startScheduler(context);
-  const { app, liveStreams } = createApp(context);
+  // Handed to the app so Settings' "sync now" reaches the same scheduler
+  // (and its in-flight guard) the timer uses, rather than a second runner.
+  const { app, liveStreams } = createApp(context, { scheduler });
 
   const server = deps.serve({ fetch: app.fetch, port: context.env.PORT }, (info) => {
     context.logger.info({ port: info.port }, "listening");

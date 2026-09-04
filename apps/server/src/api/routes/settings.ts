@@ -28,6 +28,30 @@ export interface SettingsDeps {
    */
   getCustomCss(): Promise<string | null>;
   saveCustomCss(css: string): Promise<void>;
+  /**
+   * The manual "sync now" hook into the scheduler's item-sync job. Null when
+   * no scheduler is attached (the app built without one, as in tests), in
+   * which case the status reports `available: false` and the trigger answers
+   * 503 rather than pretending to start something.
+   */
+  sync: SyncControl | null;
+}
+
+export interface SyncControl {
+  trigger(): "started" | "already_running";
+  isRunning(): boolean;
+  /** When the item sync last completed successfully, from `job_runs`. */
+  lastRunAt(): Promise<Date | null>;
+}
+
+async function syncStatus(sync: SyncControl | null) {
+  if (sync === null) return { available: false, running: false, lastRunAt: null };
+  const lastRunAt = await sync.lastRunAt();
+  return {
+    available: true,
+    running: sync.isRunning(),
+    lastRunAt: lastRunAt === null ? null : lastRunAt.toISOString(),
+  };
 }
 
 const customCssSchema = z.object({
@@ -67,8 +91,20 @@ export function registerSettingsRoutes<E extends Env, S extends Schema>(
         // Empty string rather than null, so the client has one type to render
         // into a textarea and does not need a null branch of its own.
         customCss: (await deps.getCustomCss()) ?? "",
+        sync: await syncStatus(deps.sync),
       }),
     )
+    .post("/api/settings/sync-now", (c) => {
+      if (deps.sync === null) return c.json({ error: "sync_unavailable" }, 503);
+
+      // Returns as soon as the job is started, not when it finishes: a full
+      // item sync can outlast a proxy's request timeout. The client polls
+      // GET /api/settings' `sync.running` to learn when it is done.
+      if (deps.sync.trigger() === "already_running") {
+        return c.json({ started: false, reason: "already_running" }, 200);
+      }
+      return c.json({ started: true }, 202);
+    })
     .put("/api/settings/custom-css", async (c) => {
       const body = customCssSchema.safeParse(await c.req.json().catch(() => null));
       if (!body.success) {
