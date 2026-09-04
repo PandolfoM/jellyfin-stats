@@ -1,3 +1,5 @@
+import { Link } from "@tanstack/react-router";
+
 import type { TopItemsResponse } from "../../api/queries";
 import { formatCount, formatDuration } from "../../lib/format";
 import { Badge } from "../ui/badge";
@@ -64,7 +66,15 @@ export function TopContentList({ items, loading, emptyMessage }: TopContentListP
                 className="h-14 w-10"
               />
             </TableCell>
-            <TableCell className="font-medium text-foreground">{item.name}</TableCell>
+            <TableCell className="font-medium text-foreground">
+              <Link
+                to="/items/$itemId"
+                params={{ itemId: item.itemId }}
+                className="hover:underline focus-visible:underline"
+              >
+                {item.name}
+              </Link>
+            </TableCell>
             <TableCell>
               <Badge variant="secondary">{item.type}</Badge>
             </TableCell>

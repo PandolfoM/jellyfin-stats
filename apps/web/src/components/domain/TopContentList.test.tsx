@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { renderWithRouter } from "../../test/renderWithRouter";
 import type { TopItemsResponse } from "../../api/queries";
 import { TopContentList } from "./TopContentList";
 
@@ -32,30 +33,30 @@ const UNTAGGED_ITEM: TopItemsResponse[number] = {
 const ITEMS: TopItemsResponse = [TAGGED_ITEM, UNTAGGED_ITEM];
 
 describe("TopContentList", () => {
-  it("renders an EmptyState for an empty list", () => {
-    render(<TopContentList items={[]} loading={false} />);
+  it("renders an EmptyState for an empty list", async () => {
+    await renderWithRouter(<TopContentList items={[]} loading={false} />);
 
     expect(screen.getByText("No plays in this range")).toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
-  it("renders a custom emptyMessage when given one", () => {
-    render(
+  it("renders a custom emptyMessage when given one", async () => {
+    await renderWithRouter(
       <TopContentList items={[]} loading={false} emptyMessage="No plays for this library yet" />,
     );
 
     expect(screen.getByText("No plays for this library yet")).toBeInTheDocument();
   });
 
-  it("renders item names for a populated list", () => {
-    render(<TopContentList items={ITEMS} loading={false} />);
+  it("renders item names for a populated list", async () => {
+    await renderWithRouter(<TopContentList items={ITEMS} loading={false} />);
 
     expect(screen.getByText("Example Movie One")).toBeInTheDocument();
     expect(screen.getByText("Example Show Episode")).toBeInTheDocument();
   });
 
-  it("renders skeleton rows, not the empty state or the table, while loading", () => {
-    render(<TopContentList items={[]} loading />);
+  it("renders skeleton rows, not the empty state or the table, while loading", async () => {
+    await renderWithRouter(<TopContentList items={[]} loading />);
 
     expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
     expect(screen.queryByText("No plays in this range")).not.toBeInTheDocument();
@@ -69,8 +70,8 @@ describe("TopContentList", () => {
   // item's real `imageTag` straight through unmodified; this proves it does
   // exactly that for both an item that has one and one that doesn't, rather
   // than special-casing either.
-  it("passes each item's real imageTag straight through to PosterImage, tagged or not", () => {
-    render(<TopContentList items={ITEMS} loading={false} />);
+  it("passes each item's real imageTag straight through to PosterImage, tagged or not", async () => {
+    await renderWithRouter(<TopContentList items={ITEMS} loading={false} />);
 
     const images = Array.from(document.querySelectorAll("img"));
     expect(images).toHaveLength(2);
@@ -85,5 +86,20 @@ describe("TopContentList", () => {
     expect(taggedSrc).toBe(`/api/images/items/${TAGGED_ITEM.itemId}?tag=${TAGGED_ITEM.imageTag}`);
     // No tag= at all for the untagged item — not a stringified null/undefined.
     expect(untaggedSrc).toBe(`/api/images/items/${UNTAGGED_ITEM.itemId}`);
+  });
+});
+
+describe("TopContentList item links", () => {
+  it("links each item name to its detail page", async () => {
+    await renderWithRouter(<TopContentList items={ITEMS} loading={false} />);
+
+    expect(screen.getByRole("link", { name: "Example Movie One" })).toHaveAttribute(
+      "href",
+      "/items/0123456789abcdef0123456789abcdef",
+    );
+    expect(screen.getByRole("link", { name: "Example Show Episode" })).toHaveAttribute(
+      "href",
+      "/items/fedcba9876543210fedcba9876543210",
+    );
   });
 });

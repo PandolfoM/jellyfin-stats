@@ -1,3 +1,5 @@
+import { Link } from "@tanstack/react-router";
+
 import type { HistoryResponse } from "../../api/queries";
 import { formatCount, formatDateTime, formatDuration, formatEpisodeLabel } from "../../lib/format";
 import { Badge } from "../ui/badge";
@@ -127,7 +129,13 @@ export function PlaybackHistoryTable({
                       {episodeLabel}
                     </span>
                   )}
-                  <span className="block truncate font-medium text-foreground">{row.itemName}</span>
+                  <Link
+                    to="/items/$itemId"
+                    params={{ itemId: row.itemId }}
+                    className="block truncate font-medium text-foreground hover:underline focus-visible:underline"
+                  >
+                    {row.itemName}
+                  </Link>
                 </TableCell>
                 <TableCell>
                   <Badge variant="secondary">{row.itemType}</Badge>
