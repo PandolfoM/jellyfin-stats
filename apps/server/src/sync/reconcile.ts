@@ -54,6 +54,11 @@ export async function reconcileOpenSessions(deps: ReconcileDeps): Promise<number
 
     repaired += 1;
 
+    // Same rule as the applier's `ended` branch: a play only if the row accumulated
+    // watch time before the crash. A stale row with none was churn — closed for
+    // hygiene, but not a viewing, so nothing reaches the rollup.
+    if (closed.watchMs <= 0) continue;
+
     // Closing the session in playback_sessions is only half the repair. Without this
     // the play never reaches playback_rollup_daily, and once the start day falls
     // outside the nightly recompute's trailing window — a worker down for over a week —

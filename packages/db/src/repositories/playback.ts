@@ -58,6 +58,17 @@ const ROW_REF = {
   startedAt: playbackSessions.startedAt,
 } as const;
 
+/**
+ * What closeSession hands back: the row's identity plus its accumulated watch
+ * time *after* this close's delta. The applier decides from that total — not
+ * from the final event's delta — whether the session counts as a play at all:
+ * a row that flapped out of /Sessions and back, closing with zero watch time,
+ * is churn rather than a viewing, and history already omits it at read time.
+ */
+export interface ClosedSessionRow extends SessionRowRef {
+  watchMs: number;
+}
+
 export interface RollupDelta {
   /** ISO date, `YYYY-MM-DD`. */
   day: string;
@@ -135,7 +146,7 @@ export async function touchSession(
 export async function closeSession(
   db: Db,
   input: CloseSessionInput,
-): Promise<SessionRowRef | null> {
+): Promise<ClosedSessionRow | null> {
   // An unknown runtime cannot be a completion — never divide by a missing value.
   const completed =
     input.runtimeTicks !== null &&
@@ -161,7 +172,7 @@ export async function closeSession(
         isNull(playbackSessions.endedAt),
       ),
     )
-    .returning(ROW_REF);
+    .returning({ ...ROW_REF, watchMs: playbackSessions.watchMs });
 
   return row ?? null;
 }
@@ -235,6 +246,13 @@ function nextUtcDayString(day: string): string {
  * drift from lost or double-applied incremental writes. Deleting the range first is
  * what lets it remove rows whose sessions no longer exist.
  *
+ * A play is an *ended* session with watch time above zero — the same rule the
+ * applier's `ended` branch and startup reconciliation apply incrementally, and the
+ * same rows getHistory shows. Groups that would produce an all-zero row (only
+ * flapped sessions) are dropped rather than written, matching the incremental path,
+ * which skips the delta entirely; a user whose only "activity" was churn must not
+ * show up as active anywhere.
+ *
  * The range is half-open on whole UTC days, not on the raw instants passed in: any
  * `from`/`to` that falls inside a day pulls that entire day into the recompute. `from`
  * is floored to the start of its day (the WHERE clause already covers the rest of that
@@ -280,7 +298,9 @@ export async function recomputeRollupRange(db: Db, from: Date, to: Date): Promis
         ${playbackSessions.userId},
         ${playbackSessions.itemId},
         max(${items.libraryId}) AS library_id,
-        count(*) FILTER (WHERE ${playbackSessions.endedAt} IS NOT NULL)::int AS play_count,
+        count(*) FILTER (
+          WHERE ${playbackSessions.endedAt} IS NOT NULL AND ${playbackSessions.watchMs} > 0
+        )::int AS play_count,
         coalesce(sum(${playbackSessions.watchMs}), 0) AS watch_ms
       FROM ${playbackSessions}
       LEFT JOIN ${items} ON ${items.id} = ${playbackSessions.itemId}
@@ -290,6 +310,11 @@ export async function recomputeRollupRange(db: Db, from: Date, to: Date): Promis
         (${playbackSessions.startedAt} AT TIME ZONE 'UTC')::date,
         ${playbackSessions.userId},
         ${playbackSessions.itemId}
+      HAVING
+        count(*) FILTER (
+          WHERE ${playbackSessions.endedAt} IS NOT NULL AND ${playbackSessions.watchMs} > 0
+        ) > 0
+        OR coalesce(sum(${playbackSessions.watchMs}), 0) > 0
     `);
   });
 }

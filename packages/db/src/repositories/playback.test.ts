@@ -274,7 +274,9 @@ describe("playback repositories", () => {
         at: new Date(START.getTime() + 60_000),
       });
 
-      expect(ref).toEqual({ userId: "user-1", itemId: "item-1", startedAt: START });
+      // watchMs is the row's accumulated total including this final delta —
+      // what the applier checks to decide whether the play counts at all.
+      expect(ref).toEqual({ userId: "user-1", itemId: "item-1", startedAt: START, watchMs: 1_000 });
     });
   });
 
@@ -688,6 +690,44 @@ describe("playback repositories", () => {
       const rows = await db.select().from(playbackRollupDaily);
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({ userId: realUserId });
+    });
+  });
+
+  it("does not count an ended session with zero watch time as a play, and writes no all-zero row", async () => {
+    await withTestDatabase(async (db) => {
+      // A session that flapped out of /Sessions and back closes its row with no
+      // watch time credited — churn, not a viewing. History already omits these
+      // rows at read time; the rollup must agree so play counts match.
+      await db.insert(playbackSessions).values([
+        {
+          sessionId: "ps-flap",
+          itemId: "item-1",
+          userId: "user-1",
+          startedAt: START,
+          lastSeenAt: START,
+          endedAt: new Date(START.getTime() + 5_000),
+          watchMs: 0,
+        },
+        {
+          sessionId: "ps-real",
+          itemId: "item-1",
+          userId: "user-2",
+          startedAt: START,
+          lastSeenAt: START,
+          endedAt: new Date(START.getTime() + 60_000),
+          watchMs: 6_000,
+        },
+      ]);
+
+      await recomputeRollupRange(
+        db,
+        new Date("2026-08-16T00:00:00Z"),
+        new Date("2026-08-17T00:00:00Z"),
+      );
+
+      const rows = await db.select().from(playbackRollupDaily);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ userId: "user-2", playCount: 1, watchMs: 6_000 });
     });
   });
 });
