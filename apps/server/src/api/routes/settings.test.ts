@@ -12,6 +12,11 @@ const DEPS: SettingsDeps = {
   jellyfinUrl: "http://jellyfin.example.invalid",
   getCustomCss: async () => null,
   saveCustomCss: async () => {},
+  sync: {
+    trigger: () => "started",
+    isRunning: () => false,
+    lastRunAt: async () => null,
+  },
 };
 
 function build(deps: SettingsDeps = DEPS) {
@@ -33,6 +38,7 @@ describe("GET /api/settings", () => {
       completionThreshold: 0.9,
       jellyfinUrl: "http://jellyfin.example.invalid",
       customCss: "",
+      sync: { available: true, running: false, lastRunAt: null },
     });
   });
 
@@ -53,6 +59,7 @@ describe("GET /api/settings", () => {
       completionThreshold: 0.5,
       jellyfinUrl: "http://other.example.invalid",
       customCss: "",
+      sync: { available: true, running: false, lastRunAt: null },
     });
   });
 
@@ -71,7 +78,7 @@ describe("GET /api/settings", () => {
    * response, confirming this assertion went red, then reverting — see the
    * task report for the exact diff and output.
    */
-  it("returns exactly these five keys and no others", async () => {
+  it("returns exactly these six keys and no others", async () => {
     const app = build();
 
     const response = await app.request("/api/settings");
@@ -83,6 +90,7 @@ describe("GET /api/settings", () => {
       "jellyfinUrl",
       "referenceSyncIntervalMs",
       "sessionPollIntervalMs",
+      "sync",
     ]);
   });
 
@@ -192,5 +200,65 @@ describe("PUT /api/settings/custom-css", () => {
     });
 
     expect(response.status).toBe(400);
+  });
+});
+
+describe("GET /api/settings sync status", () => {
+  it("reports a running sync and the last completed run as an ISO timestamp", async () => {
+    const app = build({
+      ...DEPS,
+      sync: {
+        trigger: () => "already_running",
+        isRunning: () => true,
+        lastRunAt: async () => new Date("2026-09-04T10:00:00.000Z"),
+      },
+    });
+
+    const body = (await (await app.request("/api/settings")).json()) as { sync: unknown };
+
+    expect(body.sync).toEqual({
+      available: true,
+      running: true,
+      lastRunAt: "2026-09-04T10:00:00.000Z",
+    });
+  });
+
+  it("reports sync as unavailable when no scheduler is attached", async () => {
+    const app = build({ ...DEPS, sync: null });
+
+    const body = (await (await app.request("/api/settings")).json()) as { sync: unknown };
+
+    expect(body.sync).toEqual({ available: false, running: false, lastRunAt: null });
+  });
+});
+
+describe("POST /api/settings/sync-now", () => {
+  it("starts an item sync and answers 202", async () => {
+    const trigger = vi.fn(() => "started" as const);
+    const app = build({ ...DEPS, sync: { ...DEPS.sync!, trigger } });
+
+    const response = await app.request("/api/settings/sync-now", { method: "POST" });
+
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ started: true });
+    expect(trigger).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers 200 with already_running instead of starting a second sync", async () => {
+    const app = build({ ...DEPS, sync: { ...DEPS.sync!, trigger: () => "already_running" } });
+
+    const response = await app.request("/api/settings/sync-now", { method: "POST" });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ started: false, reason: "already_running" });
+  });
+
+  it("answers 503 when no scheduler is attached", async () => {
+    const app = build({ ...DEPS, sync: null });
+
+    const response = await app.request("/api/settings/sync-now", { method: "POST" });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "sync_unavailable" });
   });
 });

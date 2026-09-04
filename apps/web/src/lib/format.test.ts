@@ -6,6 +6,9 @@ import {
   formatDuration,
   formatEpisodeLabel,
   formatPercent,
+  formatFullDate,
+  formatRelativeTime,
+  ticksToMs,
 } from "./format";
 
 describe("formatDuration", () => {
@@ -200,5 +203,43 @@ describe("formatDateTime in a non-UTC timezone", () => {
     // date beside a local time would show "2 Jan, 21:30" — a timestamp that
     // never existed.
     expect(formatDateTime("2026-01-02T02:30:00.000Z")).toBe("1 Jan, 9:30 PM");
+  });
+});
+
+describe("formatFullDate", () => {
+  it("renders a YYYY-MM-DD day with its year, for release dates", () => {
+    expect(formatFullDate("2019-05-17")).toBe("17 May 2019");
+  });
+
+  it("does not shift the day across a timezone — the input is a calendar date", () => {
+    expect(formatFullDate("2023-01-01")).toBe("1 Jan 2023");
+  });
+});
+
+describe("ticksToMs", () => {
+  it("converts Jellyfin's 100ns ticks to milliseconds", () => {
+    expect(ticksToMs(72_000_000_000)).toBe(7_200_000);
+  });
+});
+
+describe("formatRelativeTime", () => {
+  const NOW = Date.parse("2026-09-04T12:00:00Z");
+
+  it("renders seconds-old instants as 'just now'", () => {
+    expect(formatRelativeTime("2026-09-04T11:59:40Z", NOW)).toBe("just now");
+  });
+
+  it("renders minutes, hours, and days ago", () => {
+    expect(formatRelativeTime("2026-09-04T11:48:00Z", NOW)).toBe("12 min ago");
+    expect(formatRelativeTime("2026-09-04T09:00:00Z", NOW)).toBe("3 h ago");
+    expect(formatRelativeTime("2026-09-02T12:00:00Z", NOW)).toBe("2 days ago");
+  });
+
+  it("uses the singular for exactly one day", () => {
+    expect(formatRelativeTime("2026-09-03T12:00:00Z", NOW)).toBe("1 day ago");
+  });
+
+  it("returns a dash for an unparseable instant", () => {
+    expect(formatRelativeTime("not a date", NOW)).toBe("—");
   });
 });

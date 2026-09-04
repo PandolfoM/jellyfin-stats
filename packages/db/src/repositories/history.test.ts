@@ -414,3 +414,17 @@ describe("getHistory", () => {
     });
   });
 });
+
+describe("getHistory itemId filter", () => {
+  it("returns only sessions for that item, with a matching total", async () => {
+    await withTestDatabase(async (db) => {
+      await seed(db);
+
+      const { rows, total } = await getHistory(db, { limit: 10, offset: 0, itemId: "item-2" });
+
+      // seed() alternates item-1/item-2 across 5 sessions: indices 1 and 3 are item-2.
+      expect(total).toBe(2);
+      expect(rows.map((row) => row.itemId)).toEqual(["item-2", "item-2"]);
+    });
+  });
+});

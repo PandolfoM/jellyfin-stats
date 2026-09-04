@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { renderWithRouter } from "../../test/renderWithRouter";
 import type { HistoryResponse } from "../../api/queries";
 import { ActivityFeed } from "./ActivityFeed";
 
@@ -51,23 +52,23 @@ const ROWS: HistoryResponse["rows"] = [
 ];
 
 describe("ActivityFeed", () => {
-  it("renders skeletons, not the list or empty state, while loading", () => {
-    render(<ActivityFeed rows={[]} loading />);
+  it("renders skeletons, not the list or empty state, while loading", async () => {
+    await renderWithRouter(<ActivityFeed rows={[]} loading />);
 
     expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
     expect(screen.queryByText("No recent activity")).not.toBeInTheDocument();
   });
 
-  it("renders an EmptyState for an empty list once loaded", () => {
-    render(<ActivityFeed rows={[]} loading={false} />);
+  it("renders an EmptyState for an empty list once loaded", async () => {
+    await renderWithRouter(<ActivityFeed rows={[]} loading={false} />);
 
     expect(screen.getByText("No recent activity")).toBeInTheDocument();
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
 
-  it("renders one row per entry, with the item name, user, and duration", () => {
-    render(<ActivityFeed rows={ROWS} loading={false} />);
+  it("renders one row per entry, with the item name, user, and duration", async () => {
+    await renderWithRouter(<ActivityFeed rows={ROWS} loading={false} />);
 
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
     expect(screen.getByText("Example Movie One")).toBeInTheDocument();
@@ -79,21 +80,21 @@ describe("ActivityFeed", () => {
     expect(screen.getByText("25m")).toBeInTheDocument();
   });
 
-  it("does not fetch anything itself", () => {
+  it("does not fetch anything itself", async () => {
     const fetchSpy = vi.fn(() => {
       throw new Error("ActivityFeed must not fetch anything itself");
     });
     vi.stubGlobal("fetch", fetchSpy);
 
-    render(<ActivityFeed rows={ROWS} loading={false} />);
+    await renderWithRouter(<ActivityFeed rows={ROWS} loading={false} />);
 
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 
 describe("ActivityFeed episode context and timestamp", () => {
-  it("puts the series and S/E numbering on the episode row's meta line", () => {
-    render(<ActivityFeed rows={ROWS} loading={false} />);
+  it("puts the series and S/E numbering on the episode row's meta line", async () => {
+    await renderWithRouter(<ActivityFeed rows={ROWS} loading={false} />);
 
     // ROWS[1] is the Episode fixture. The series leads the line so it survives
     // truncation on a narrow card; the user has its own column and is
@@ -103,8 +104,8 @@ describe("ActivityFeed episode context and timestamp", () => {
     expect(meta).not.toHaveTextContent("grace");
   });
 
-  it("leaves a movie's meta line without an episode prefix", () => {
-    render(<ActivityFeed rows={ROWS} loading={false} />);
+  it("leaves a movie's meta line without an episode prefix", async () => {
+    await renderWithRouter(<ActivityFeed rows={ROWS} loading={false} />);
 
     // ROWS[0] is the Movie fixture: formatEpisodeLabel returns null for it, and
     // the filtered join must leave the timestamp alone rather than emitting a
@@ -113,19 +114,34 @@ describe("ActivityFeed episode context and timestamp", () => {
     expect(meta).toBeInTheDocument();
   });
 
-  it("renders the user in its own column, outside the meta line", () => {
-    render(<ActivityFeed rows={ROWS} loading={false} />);
+  it("renders the user in its own column, outside the meta line", async () => {
+    await renderWithRouter(<ActivityFeed rows={ROWS} loading={false} />);
 
     expect(screen.getByText("ada")).toBeInTheDocument();
     expect(screen.getByText("grace")).toBeInTheDocument();
   });
 
-  it("shows the time of day alongside the date", () => {
-    render(<ActivityFeed rows={ROWS} loading={false} />);
+  it("shows the time of day alongside the date", async () => {
+    await renderWithRouter(<ActivityFeed rows={ROWS} loading={false} />);
 
     // Shape, not exact values: the timestamp renders in the reader's local
     // timezone. `formatDateTime`'s own tests pin a zone and assert the values.
     const meta = screen.getByText(/^Example Show · S2E5 · /);
     expect(meta.textContent).toMatch(/\d{1,2} \w{3}, \d{1,2}:\d{2} [AP]M$/);
+  });
+});
+
+describe("ActivityFeed item links", () => {
+  it("links each item name to its detail page", async () => {
+    await renderWithRouter(<ActivityFeed rows={ROWS} loading={false} />);
+
+    expect(screen.getByRole("link", { name: "Example Movie One" })).toHaveAttribute(
+      "href",
+      "/items/item-1",
+    );
+    expect(screen.getByRole("link", { name: "Example Show Episode" })).toHaveAttribute(
+      "href",
+      "/items/item-2",
+    );
   });
 });

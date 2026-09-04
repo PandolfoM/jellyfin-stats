@@ -102,3 +102,46 @@ export function formatDateTime(iso: string): string {
   // convention for a 12-hour clock. Minutes still are, since "8:5 PM" is not.
   return `${date.getDate()} ${MONTHS[date.getMonth()] ?? "?"}, ${hours12}:${minutes} ${meridiem}`;
 }
+
+/**
+ * A calendar day (`YYYY-MM-DD`) with its year — "17 May 2019" — for dates
+ * where the year is the point, like a release date. Like `formatDay`, this
+ * is string slicing rather than `Date` construction: the input is a
+ * calendar date, not an instant, and must never shift across a timezone.
+ */
+export function formatFullDate(day: string): string {
+  const [year, month, date] = day.split("-");
+  const monthIndex = Number(month) - 1;
+  return `${Number(date)} ${MONTHS[monthIndex] ?? "?"} ${year}`;
+}
+
+const TICKS_PER_MS = 10_000;
+
+/** Jellyfin reports positions and runtimes in 100-nanosecond ticks. */
+export function ticksToMs(ticks: number): number {
+  return ticks / TICKS_PER_MS;
+}
+
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+/**
+ * "12 min ago" / "3 h ago" / "2 days ago" for a past instant, relative to
+ * `now` — for "last synced" style status lines where the reader wants
+ * staleness at a glance, not a wall-clock time. Under a minute is "just
+ * now"; the input is a full ISO timestamp, so unlike `formatDay` this one
+ * does go through `Date`.
+ */
+export function formatRelativeTime(iso: string, now: number = Date.now()): string {
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return "—";
+
+  const elapsed = Math.max(0, now - at);
+  if (elapsed < MINUTE_MS) return "just now";
+  if (elapsed < HOUR_MS) return `${Math.floor(elapsed / MINUTE_MS)} min ago`;
+  if (elapsed < DAY_MS) return `${Math.floor(elapsed / HOUR_MS)} h ago`;
+
+  const days = Math.floor(elapsed / DAY_MS);
+  return days === 1 ? "1 day ago" : `${days} days ago`;
+}

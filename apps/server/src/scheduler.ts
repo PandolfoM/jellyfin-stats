@@ -272,23 +272,56 @@ export async function runDueJobs(
       if (lastAttemptAt !== undefined && now - lastAttemptAt < FAILURE_BACKOFF_MS) continue;
     }
 
-    deps.lastAttemptAt.set(name, now);
-
-    const run = deps
-      .runJob(name)
-      .then(() => {
-        deps.lastAttemptAt.delete(name);
-        return deps.writeRun(name, new Date(now));
-      })
-      .catch((error: unknown) => {
-        deps.logger.error({ err: error, job: name }, "scheduled job failed");
-      })
-      .finally(() => {
-        deps.inFlight.delete(name);
-      });
-
-    deps.inFlight.set(name, run);
+    startJob(deps, name, now);
   }
+}
+
+/**
+ * Starts one job and wires up its bookkeeping: `inFlight` while it runs,
+ * `lastAttemptAt` for the failure backoff, `writeRun` on success, and a log
+ * line on failure. Shared by the scheduled path (`runDueJobs`) and the
+ * manual one (`triggerJob`) so a manually started run is indistinguishable
+ * from a scheduled one once it is going — same logging, same `job_runs`
+ * record, same guard against overlapping itself.
+ */
+function startJob(deps: SchedulerDeps, name: JobName, now: number): void {
+  deps.lastAttemptAt.set(name, now);
+
+  const run = deps
+    .runJob(name)
+    .then(() => {
+      deps.lastAttemptAt.delete(name);
+      return deps.writeRun(name, new Date(now));
+    })
+    .catch((error: unknown) => {
+      deps.logger.error({ err: error, job: name }, "scheduled job failed");
+    })
+    .finally(() => {
+      deps.inFlight.delete(name);
+    });
+
+  deps.inFlight.set(name, run);
+}
+
+export type TriggerResult = "started" | "already_running";
+
+/**
+ * Runs a job now, on demand, regardless of its schedule or the failure
+ * backoff — the operator asking is the point. The only thing it refuses is
+ * overlapping itself: a second trigger while the same job is still in flight
+ * reports `already_running` and starts nothing. It does not wait for
+ * completion; callers watch `inFlight` (via `isRunning` on the handle).
+ */
+export function triggerJob(deps: SchedulerDeps, name: JobName, now: number): TriggerResult {
+  if (deps.inFlight.has(name)) return "already_running";
+  startJob(deps, name, now);
+  return "started";
+}
+
+export interface SchedulerHandle {
+  stop(): Promise<void>;
+  triggerJob(name: JobName): TriggerResult;
+  isRunning(name: JobName): boolean;
 }
 
 export interface StartSchedulerOptions {
@@ -313,7 +346,7 @@ export interface StartSchedulerOptions {
 export function startScheduler(
   context: AppContext,
   options: StartSchedulerOptions = {},
-): { stop(): Promise<void> } {
+): SchedulerHandle {
   const now = options.now ?? Date.now;
   const runJob = options.runJob ?? ((name: JobName) => handle(context, name, now));
   // Ticks at most every 1s, faster than the shortest schedule it dispatches
@@ -362,5 +395,7 @@ export function startScheduler(
       clearInterval(timer);
       await Promise.allSettled([...deps.inFlight.values()]);
     },
+    triggerJob: (name) => triggerJob(deps, name, now()),
+    isRunning: (name) => deps.inFlight.has(name),
   };
 }

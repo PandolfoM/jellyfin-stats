@@ -1,3 +1,5 @@
+import { Link } from "@tanstack/react-router";
+
 import type { HistoryResponse } from "../../api/queries";
 import { formatDateTime, formatDuration, formatEpisodeLabel } from "../../lib/format";
 import { Badge } from "../ui/badge";
@@ -68,7 +70,13 @@ export function ActivityFeed({ rows, loading }: ActivityFeedProps) {
           className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm sm:grid sm:grid-cols-3"
         >
           <div className="flex min-w-0 flex-1 flex-col sm:flex-none">
-            <span className="truncate font-medium text-foreground">{row.itemName}</span>
+            <Link
+              to="/items/$itemId"
+              params={{ itemId: row.itemId }}
+              className="truncate font-medium text-foreground hover:underline focus-visible:underline"
+            >
+              {row.itemName}
+            </Link>
             <span className="truncate text-xs text-muted-foreground">
               {[formatEpisodeLabel(row), formatDateTime(row.startedAt)]
                 .filter((part) => part !== null)

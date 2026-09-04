@@ -47,6 +47,7 @@ export function registerHistoryRoutes<E extends Env, S extends Schema>(
       offset,
       userId: c.req.query("userId"),
       libraryId: c.req.query("libraryId"),
+      itemId: c.req.query("itemId"),
       from,
       to,
     });

@@ -1,5 +1,6 @@
 import {
   getHistory,
+  getItemDetail,
   getLibraryStats,
   getOverview,
   getTopItems,
@@ -7,17 +8,20 @@ import {
   getUserStats,
   getSetting,
   getWatchTimeSeries,
+  readJobRuns,
   setSetting,
 } from "@jfstats/db";
 import type { AppEnv } from "@jfstats/shared";
 import { Hono } from "hono";
 import type { AppContext } from "../context.js";
+import type { SchedulerHandle } from "../scheduler.js";
 import type { SnapshotStore } from "../sync/snapshot-store.js";
 import { requireAdmin } from "./middleware/auth.js";
 import { createRateLimiter } from "./rate-limit.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerHistoryRoutes } from "./routes/history.js";
 import { registerImageRoutes, type ImageDeps } from "./routes/images.js";
+import { registerItemRoutes } from "./routes/items.js";
 import { registerLiveRoute, type LiveDeps } from "./routes/live.js";
 import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerStatsRoutes } from "./routes/stats.js";
@@ -102,8 +106,19 @@ export function createImageFetcher(
 // AppType is derived from the real return value instead, so `hc<AppType>` on
 // the web side sees every /api/* route registered below rather than
 // resolving to `unknown`.
-export function createApp(context: AppContext) {
+export interface CreateAppOptions {
+  /**
+   * The running scheduler, so Settings can trigger an item sync on demand
+   * and report whether one is running. Optional because the scheduler is
+   * started by `startApp` (main.ts), not here, and tests build the app
+   * without one — the sync endpoint then reports itself unavailable.
+   */
+  scheduler?: SchedulerHandle;
+}
+
+export function createApp(context: AppContext, options: CreateAppOptions = {}) {
   const app = new Hono<{ Variables: AppVariables }>();
+  const { scheduler } = options;
 
   app.get("/api/health", (c) => c.json({ status: "ok" }));
 
@@ -133,6 +148,9 @@ export function createApp(context: AppContext) {
   // Ungated, this would let anyone who can reach the port enumerate a
   // private media library by walking item ids.
   app.use("/api/images/*", requireAdmin(sessions, cookieConfig));
+  // Same exposure as the image proxy: an open detail endpoint would let anyone
+  // who can reach the port read a private library by walking item ids.
+  app.use("/api/items/*", requireAdmin(sessions, cookieConfig));
   // The effective sync intervals, completion threshold, and Jellyfin server
   // URL are configuration, not secrets — but they are still only meant for
   // whoever configured this deployment, not anyone who can reach the port.
@@ -201,17 +219,37 @@ export function createApp(context: AppContext) {
     jellyfinUrl: context.env.JELLYFIN_URL,
     getCustomCss: () => getSetting(context.db, "custom_css"),
     saveCustomCss: (css) => setSetting(context.db, "custom_css", css),
+    sync:
+      scheduler === undefined
+        ? null
+        : {
+            trigger: () => scheduler.triggerJob("item-sync"),
+            isRunning: () => scheduler.isRunning("item-sync"),
+            lastRunAt: async () => (await readJobRuns(context.db)).get("item-sync") ?? null,
+          },
   });
 
   const imagesApp = registerImageRoutes(settingsApp, {
     fetchImage: createImageFetcher(context.env),
   });
 
+  const itemsApp = registerItemRoutes(imagesApp, {
+    getItemDetail: (itemId, range) => getItemDetail(context.db, itemId, range),
+    // The route tolerates a failed lookup by rendering without metadata, so
+    // this is the only place the failure would ever be visible — log it
+    // here, once, rather than leave "details unavailable" undiagnosable.
+    fetchItemMetadata: (itemId) =>
+      context.jellyfin.getItem(itemId).catch((error: unknown) => {
+        context.logger?.warn({ err: error, itemId }, "item metadata lookup failed");
+        throw error;
+      }),
+  });
+
   // registerLiveRoute returns one object carrying both the chained app (used
   // just below) and the LiveStreamRegistry members themselves — see that
   // file for why this one is flattened rather than following the same
-  // pattern as statsApp/historyApp/imagesApp above.
-  const liveStreams = registerLiveRoute(imagesApp, {
+  // pattern as statsApp/historyApp/itemsApp above.
+  const liveStreams = registerLiveRoute(itemsApp, {
     loadCurrent: () => context.snapshots.loadLive(),
     subscribe: createLiveSubscriber(context.snapshots),
   });

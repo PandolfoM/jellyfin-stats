@@ -5,5 +5,6 @@ export * from "./repositories/playback.js";
 export * from "./repositories/auth.js";
 export * from "./repositories/stats.js";
 export * from "./repositories/history.js";
+export * from "./repositories/items.js";
 export * from "./repositories/jobs.js";
 export * from "./repositories/settings.js";

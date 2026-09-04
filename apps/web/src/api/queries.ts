@@ -35,6 +35,7 @@ export type UserDetailResponse = InferResponseType<
 export type LibraryStatsResponse = InferResponseType<typeof api.api.stats.libraries.$get, 200>;
 export type HistoryResponse = InferResponseType<typeof api.api.history.$get, 200>;
 export type SettingsResponse = InferResponseType<typeof api.api.settings.$get, 200>;
+export type ItemDetailResponse = InferResponseType<(typeof api.api.items)[":itemId"]["$get"], 200>;
 
 export interface TopItemsOptions {
   limit?: number;
@@ -50,6 +51,7 @@ export interface HistoryQueryOptions {
   offset?: number;
   userId?: string;
   libraryId?: string;
+  itemId?: string;
 }
 
 /**
@@ -74,6 +76,7 @@ const queryKeys = {
   userDetail: (userId: string, range: DateRange) => ["stats", "users", userId, range] as const,
   libraries: (range: DateRange) => ["stats", "libraries", range] as const,
   history: (opts: HistoryQueryOptions) => ["history", opts] as const,
+  itemDetail: (itemId: string, range: DateRange) => ["items", itemId, range] as const,
   settings: () => ["settings"] as const,
 };
 
@@ -160,9 +163,24 @@ export function historyQuery(opts: HistoryQueryOptions) {
             offset: opts.offset !== undefined ? String(opts.offset) : undefined,
             userId: opts.userId,
             libraryId: opts.libraryId,
+            itemId: opts.itemId,
           },
         }),
       ),
+  });
+}
+
+type ItemDetailArgs = Parameters<(typeof api.api.items)[":itemId"]["$get"]>[0] & {
+  query: DateRange;
+};
+
+export function itemDetailQuery(itemId: string, range: DateRange) {
+  return queryOptions({
+    queryKey: queryKeys.itemDetail(itemId, range),
+    queryFn: async () => {
+      const args: ItemDetailArgs = { param: { itemId }, query: range };
+      return unwrap<ItemDetailResponse>(await api.api.items[":itemId"].$get(args));
+    },
   });
 }
 
@@ -184,4 +202,20 @@ export function settingsQuery() {
  */
 export async function saveCustomCss(css: string): Promise<void> {
   await unwrap<{ ok: boolean }>(await api.api.settings["custom-css"].$put({ json: { css } }));
+}
+
+export type TriggerSyncResponse = InferResponseType<
+  (typeof api.api.settings)["sync-now"]["$post"],
+  200 | 202
+>;
+
+/**
+ * Asks the server to run a full library sync now. Resolves as soon as the
+ * job has been *started* (or refused because one is already running) — not
+ * when it finishes; the caller watches `settingsQuery`'s `sync.running` for
+ * that. A plain function rather than `mutationOptions`, for the same reason
+ * as `saveCustomCss` above.
+ */
+export async function triggerSync(): Promise<TriggerSyncResponse> {
+  return unwrap<TriggerSyncResponse>(await api.api.settings["sync-now"].$post());
 }

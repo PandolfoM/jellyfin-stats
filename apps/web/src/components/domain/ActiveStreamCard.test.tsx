@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import type { LiveSession } from "@jfstats/shared";
-import { render, screen, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { renderWithRouter } from "../../test/renderWithRouter";
 import { ActiveStreamCard } from "./ActiveStreamCard";
 
 afterEach(() => vi.restoreAllMocks());
@@ -27,22 +28,22 @@ const BASE_SESSION: LiveSession = {
 };
 
 describe("ActiveStreamCard", () => {
-  it("renders the item name, viewer, and device for both variants", () => {
-    render(<ActiveStreamCard session={BASE_SESSION} variant="compact" />);
+  it("renders the item name, viewer, and device for both variants", async () => {
+    await renderWithRouter(<ActiveStreamCard session={BASE_SESSION} variant="compact" />);
     expect(screen.getByText("Sample Movie One")).toBeInTheDocument();
     expect(screen.getByText("sample-viewer · Living Room TV")).toBeInTheDocument();
   });
 
-  it("shows elapsed and total duration, converted from Jellyfin's 100ns ticks", () => {
-    render(<ActiveStreamCard session={BASE_SESSION} variant="full" />);
+  it("shows elapsed and total duration, converted from Jellyfin's 100ns ticks", async () => {
+    await renderWithRouter(<ActiveStreamCard session={BASE_SESSION} variant="full" />);
     // 15m elapsed of a 45m runtime — proves the ticks-to-ms conversion is
     // actually applied (10,000 ticks/ms), not e.g. ticks treated as ms
     // directly, which would print something absurd like "9000000m".
     expect(screen.getByText("15m / 45m")).toBeInTheDocument();
   });
 
-  it("renders a progress bar sized to position/runtime when a runtime is known", () => {
-    render(<ActiveStreamCard session={BASE_SESSION} variant="full" />);
+  it("renders a progress bar sized to position/runtime when a runtime is known", async () => {
+    await renderWithRouter(<ActiveStreamCard session={BASE_SESSION} variant="full" />);
 
     const bar = screen.getByRole("progressbar", { name: "Playback progress for Sample Movie One" });
     // 15/45 = 33.33...%, rounded.
@@ -51,37 +52,41 @@ describe("ActiveStreamCard", () => {
     expect(bar).toHaveAttribute("aria-valuemax", "100");
   });
 
-  it("omits the progress bar, and shows only elapsed time, when runtime is unknown (e.g. live TV)", () => {
+  it("omits the progress bar, and shows only elapsed time, when runtime is unknown (e.g. live TV)", async () => {
     const session: LiveSession = { ...BASE_SESSION, runtimeTicks: null };
-    render(<ActiveStreamCard session={session} variant="full" />);
+    await renderWithRouter(<ActiveStreamCard session={session} variant="full" />);
 
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(screen.getByText("15m")).toBeInTheDocument();
     expect(screen.queryByText(/\//)).not.toBeInTheDocument();
   });
 
-  it("full variant shows the client and play-method badges; compact hides them", () => {
-    const { rerender } = render(<ActiveStreamCard session={BASE_SESSION} variant="full" />);
+  it("full variant shows the client and play-method badges; compact hides them", async () => {
+    const { rerender } = await renderWithRouter(
+      <ActiveStreamCard session={BASE_SESSION} variant="full" />,
+    );
     expect(screen.getByText("Jellyfin Web")).toBeInTheDocument();
     expect(screen.getByText("DirectPlay")).toBeInTheDocument();
 
-    rerender(<ActiveStreamCard session={BASE_SESSION} variant="compact" />);
+    await rerender(<ActiveStreamCard session={BASE_SESSION} variant="compact" />);
     expect(screen.queryByText("Jellyfin Web")).not.toBeInTheDocument();
     expect(screen.queryByText("DirectPlay")).not.toBeInTheDocument();
   });
 
-  it("full variant shows a Paused badge when the session is paused, and none when it isn't", () => {
+  it("full variant shows a Paused badge when the session is paused, and none when it isn't", async () => {
     const paused: LiveSession = { ...BASE_SESSION, isPaused: true };
-    const { rerender } = render(<ActiveStreamCard session={paused} variant="full" />);
+    const { rerender } = await renderWithRouter(
+      <ActiveStreamCard session={paused} variant="full" />,
+    );
     expect(screen.getByText("Paused")).toBeInTheDocument();
 
-    rerender(<ActiveStreamCard session={BASE_SESSION} variant="full" />);
+    await rerender(<ActiveStreamCard session={BASE_SESSION} variant="full" />);
     expect(screen.queryByText("Paused")).not.toBeInTheDocument();
   });
 
-  it("compact variant surfaces paused state as text, since it hides badges entirely", () => {
+  it("compact variant surfaces paused state as text, since it hides badges entirely", async () => {
     const paused: LiveSession = { ...BASE_SESSION, isPaused: true };
-    render(<ActiveStreamCard session={paused} variant="compact" />);
+    await renderWithRouter(<ActiveStreamCard session={paused} variant="compact" />);
     expect(screen.getByText("15m / 45m · Paused")).toBeInTheDocument();
   });
 
@@ -90,8 +95,8 @@ describe("ActiveStreamCard", () => {
   // (a missing tag is a missing cache-busting hint, not a missing image —
   // see PosterImage.test.tsx). What this must never do is fabricate a tag,
   // or point anywhere but our own proxy.
-  it("requests the poster through our own proxy, with no tag, and never a Jellyfin URL", () => {
-    render(<ActiveStreamCard session={BASE_SESSION} variant="full" />);
+  it("requests the poster through our own proxy, with no tag, and never a Jellyfin URL", async () => {
+    await renderWithRouter(<ActiveStreamCard session={BASE_SESSION} variant="full" />);
 
     const img = screen.getByRole("img", { name: "Poster for Sample Movie One" });
     expect(img.tagName).toBe("IMG");
@@ -101,13 +106,13 @@ describe("ActiveStreamCard", () => {
     expect(src).not.toMatch(/^https?:\/\//);
   });
 
-  it("renders one card per distinct session when used in a list, keyed by sessionId", () => {
+  it("renders one card per distinct session when used in a list, keyed by sessionId", async () => {
     const other: LiveSession = {
       ...BASE_SESSION,
       sessionId: "session-bbbb",
       itemName: "Sample Movie Two",
     };
-    render(
+    await renderWithRouter(
       <>
         <ActiveStreamCard session={BASE_SESSION} variant="full" />
         <ActiveStreamCard session={other} variant="full" />
@@ -118,5 +123,23 @@ describe("ActiveStreamCard", () => {
     expect(cards).toHaveLength(2);
     expect(within(cards[0] as HTMLElement).getByText("Sample Movie One")).toBeInTheDocument();
     expect(within(cards[1] as HTMLElement).getByText("Sample Movie Two")).toBeInTheDocument();
+  });
+});
+
+describe("ActiveStreamCard item links", () => {
+  it("links the item name to its detail page in both variants", async () => {
+    const { rerender } = await renderWithRouter(
+      <ActiveStreamCard session={BASE_SESSION} variant="full" />,
+    );
+    expect(screen.getByRole("link", { name: "Sample Movie One" })).toHaveAttribute(
+      "href",
+      "/items/0123456789abcdef0123456789abcdef",
+    );
+
+    await rerender(<ActiveStreamCard session={BASE_SESSION} variant="compact" />);
+    expect(screen.getByRole("link", { name: "Sample Movie One" })).toHaveAttribute(
+      "href",
+      "/items/0123456789abcdef0123456789abcdef",
+    );
   });
 });

@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { DateRange } from "../lib/range";
 import {
   historyQuery,
+  itemDetailQuery,
+  triggerSync,
   libraryStatsQuery,
   overviewQuery,
   seriesQuery,
@@ -197,3 +199,71 @@ type HistoryQueryData = Awaited<
   ReturnType<NonNullable<ReturnType<typeof historyQuery>["queryFn"]>>
 >;
 type _HistoryFieldAccessTypechecks = HistoryQueryData["total"];
+
+describe("itemDetailQuery", () => {
+  it("has a key distinct from every other factory for the same range", () => {
+    const others = [
+      overviewQuery(RANGE_A).queryKey,
+      topItemsQuery(RANGE_A, {}).queryKey,
+      userDetailQuery("item-1", RANGE_A).queryKey,
+      historyQuery({ itemId: "item-1" }).queryKey,
+    ].map((key) => JSON.stringify(key));
+
+    expect(others).not.toContain(JSON.stringify(itemDetailQuery("item-1", RANGE_A).queryKey));
+  });
+
+  it("changes its key when the range changes, with itemId held fixed", () => {
+    expect(itemDetailQuery("item-1", RANGE_A).queryKey).not.toEqual(
+      itemDetailQuery("item-1", RANGE_B).queryKey,
+    );
+  });
+
+  it("changes its key when itemId changes, with the range held fixed", () => {
+    expect(itemDetailQuery("item-1", RANGE_A).queryKey).not.toEqual(
+      itemDetailQuery("item-2", RANGE_A).queryKey,
+    );
+  });
+});
+
+describe("historyQuery itemId filter", () => {
+  it("changes the key when `itemId` changes, all else held fixed", () => {
+    expect(historyQuery({ itemId: "item-1" }).queryKey).not.toEqual(
+      historyQuery({ itemId: "item-2" }).queryKey,
+    );
+  });
+
+  it("sends itemId as a query parameter", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL) =>
+        new Response(JSON.stringify({ rows: [], total: 0 }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await historyQuery({ itemId: "item-1" }).queryFn!({} as never);
+
+    const url = String(fetchMock.mock.calls[0]?.[0]);
+    expect(new URL(url, "http://localhost").searchParams.get("itemId")).toBe("item-1");
+  });
+});
+
+describe("triggerSync", () => {
+  it("POSTs to the sync-now endpoint and resolves with whether a sync started", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ started: true }), {
+          status: 202,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(triggerSync()).resolves.toEqual({ started: true });
+
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).toContain("/api/settings/sync-now");
+    expect(init?.method).toBe("POST");
+  });
+});

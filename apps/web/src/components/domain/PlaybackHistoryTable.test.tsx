@@ -18,10 +18,11 @@
 //      totals assertion below computes its expected numbers from the
 //      fixture's own constants, independently of the component's formula,
 //      and one test targets the last (partial) page specifically.
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
 
+import { renderWithRouter } from "../../test/renderWithRouter";
 import { PlaybackHistoryTable, type PlaybackHistoryRow } from "./PlaybackHistoryTable";
 
 const PAGE_SIZE = 50;
@@ -91,8 +92,8 @@ function PaginatedHarness() {
 }
 
 describe("PlaybackHistoryTable pagination", () => {
-  it("walking every page collects the full row sequence exactly once each, in order — catches gaps as well as repeats", () => {
-    render(<PaginatedHarness />);
+  it("walking every page collects the full row sequence exactly once each, in order — catches gaps as well as repeats", async () => {
+    await renderWithRouter(<PaginatedHarness />);
 
     const collected: string[] = [...visibleRowIds()];
     expect(collected).toHaveLength(50);
@@ -111,8 +112,8 @@ describe("PlaybackHistoryTable pagination", () => {
     expect(collected).toEqual(ALL_ROWS.map((row) => row.id));
   });
 
-  it("calls onPageChange with the next page number, and the rows shown afterward reflect it", () => {
-    render(<PaginatedHarness />);
+  it("calls onPageChange with the next page number, and the rows shown afterward reflect it", async () => {
+    await renderWithRouter(<PaginatedHarness />);
 
     expect(visibleRowIds()[0]).toBe("row-000");
 
@@ -127,8 +128,8 @@ describe("PlaybackHistoryTable pagination", () => {
     expect(visibleRowIds()[0]).toBe("row-050");
   });
 
-  it("disables Previous on the first page and Next on the last page, and neither on a middle page", () => {
-    render(<PaginatedHarness />);
+  it("disables Previous on the first page and Next on the last page, and neither on a middle page", async () => {
+    await renderWithRouter(<PaginatedHarness />);
 
     expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Next" })).not.toBeDisabled();
@@ -144,8 +145,8 @@ describe("PlaybackHistoryTable pagination", () => {
 });
 
 describe("PlaybackHistoryTable totals line", () => {
-  it("renders 'showing 1–50 of 125' on the first (full) page, from fixture-derived values", () => {
-    render(
+  it("renders 'showing 1–50 of 125' on the first (full) page, from fixture-derived values", async () => {
+    await renderWithRouter(
       <PlaybackHistoryTable
         rows={pageSlice(1)}
         total={TOTAL_ROWS}
@@ -163,10 +164,10 @@ describe("PlaybackHistoryTable totals line", () => {
     );
   });
 
-  it("renders the correct bound on the LAST (partial) page — total, not page * pageSize", () => {
+  it("renders the correct bound on the LAST (partial) page — total, not page * pageSize", async () => {
     const lastPage = 3;
 
-    render(
+    await renderWithRouter(
       <PlaybackHistoryTable
         rows={pageSlice(lastPage)}
         total={TOTAL_ROWS}
@@ -191,8 +192,8 @@ describe("PlaybackHistoryTable totals line", () => {
 });
 
 describe("PlaybackHistoryTable rendering", () => {
-  it("renders a row with placeholder names for deleted media plainly, with no special-casing", () => {
-    render(
+  it("renders a row with placeholder names for deleted media plainly, with no special-casing", async () => {
+    await renderWithRouter(
       <PlaybackHistoryTable
         rows={[
           makeRow(0, { itemName: "Unknown item", userName: "Unknown user", itemType: "Unknown" }),
@@ -212,8 +213,8 @@ describe("PlaybackHistoryTable rendering", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("shows a loading skeleton and no table while loading", () => {
-    render(
+  it("shows a loading skeleton and no table while loading", async () => {
+    await renderWithRouter(
       <PlaybackHistoryTable
         rows={[]}
         total={0}
@@ -228,8 +229,8 @@ describe("PlaybackHistoryTable rendering", () => {
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
-  it("shows an empty state, not a table, when there are no rows and loading has finished", () => {
-    render(
+  it("shows an empty state, not a table, when there are no rows and loading has finished", async () => {
+    await renderWithRouter(
       <PlaybackHistoryTable
         rows={[]}
         total={0}
@@ -246,10 +247,10 @@ describe("PlaybackHistoryTable rendering", () => {
 });
 
 describe("PlaybackHistoryTable started column", () => {
-  it("shows the time of day, not just the date", () => {
+  it("shows the time of day, not just the date", async () => {
     // Two sessions on the same day have to be distinguishable in the column;
     // rendering the date alone made a whole evening look like one entry.
-    render(
+    await renderWithRouter(
       <PlaybackHistoryTable
         rows={[
           makeRow(0, { id: "row-morning", startedAt: "2026-01-01T09:05:00.000Z" }),
@@ -280,8 +281,8 @@ describe("PlaybackHistoryTable episode context", () => {
   // "Fishes" or "Chapter 4" is unidentifiable on its own in a history that
   // mixes shows together, so an episode row has to carry its series and its
   // S/E numbering alongside the episode's own name.
-  function renderRows(rows: PlaybackHistoryRow[]) {
-    render(
+  async function renderRows(rows: PlaybackHistoryRow[]) {
+    await renderWithRouter(
       <PlaybackHistoryTable
         rows={rows}
         total={rows.length}
@@ -293,8 +294,8 @@ describe("PlaybackHistoryTable episode context", () => {
     );
   }
 
-  it("shows the series, season and episode number alongside the episode name", () => {
-    renderRows([
+  it("shows the series, season and episode number alongside the episode name", async () => {
+    await renderRows([
       makeRow(0, {
         itemName: "Fishes",
         itemType: "Episode",
@@ -313,18 +314,18 @@ describe("PlaybackHistoryTable episode context", () => {
     expect(screen.getByText("Fishes")).toBeInTheDocument();
   });
 
-  it("renders no episode line for a movie", () => {
-    renderRows([makeRow(0, { itemName: "Example Movie", itemType: "Movie" })]);
+  it("renders no episode line for a movie", async () => {
+    await renderRows([makeRow(0, { itemName: "Example Movie", itemType: "Movie" })]);
 
     expect(screen.queryByTestId("playback-history-episode-label")).not.toBeInTheDocument();
     expect(screen.getByText("Example Movie")).toBeInTheDocument();
   });
 
-  it("renders what it has for an episode Jellyfin never numbered", () => {
+  it("renders what it has for an episode Jellyfin never numbered", async () => {
     // Extras and specials can arrive with a series but no IndexNumber, and
     // episodes synced before the columns existed have neither until the next
     // full item sync. Neither case should render an empty line or "SundefinedE".
-    renderRows([
+    await renderRows([
       makeRow(0, {
         itemName: "Behind the Scenes",
         itemType: "Episode",
@@ -335,5 +336,25 @@ describe("PlaybackHistoryTable episode context", () => {
     ]);
 
     expect(screen.getByTestId("playback-history-episode-label")).toHaveTextContent("The Bear");
+  });
+});
+
+describe("PlaybackHistoryTable item links", () => {
+  it("links each item name to its detail page", async () => {
+    await renderWithRouter(
+      <PlaybackHistoryTable
+        rows={[makeRow(0, { itemId: "abc123", itemName: "Linked Movie" })]}
+        total={1}
+        page={1}
+        pageSize={PAGE_SIZE}
+        onPageChange={() => {}}
+        loading={false}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: "Linked Movie" })).toHaveAttribute(
+      "href",
+      "/items/abc123",
+    );
   });
 });

@@ -1,7 +1,8 @@
 import type { LiveSession } from "@jfstats/shared";
+import { Link } from "@tanstack/react-router";
 
 import { cn } from "../../lib/cn";
-import { formatDuration } from "../../lib/format";
+import { formatDuration, ticksToMs } from "../../lib/format";
 import { Badge } from "../ui/badge";
 import { Card, CardContent } from "../ui/card";
 import { PosterImage } from "./PosterImage";
@@ -17,12 +18,6 @@ export interface ActiveStreamCardProps {
 // this exists yet; it's a numeric constant, not a type, so defining it
 // locally doesn't create the kind of hand-declared-shape drift risk the
 // LiveSession type import is meant to avoid.
-const TICKS_PER_MS = 10_000;
-
-function ticksToMs(ticks: number): number {
-  return ticks / TICKS_PER_MS;
-}
-
 /**
  * One active playback session, reused at two sizes: `compact` for a glance
  * on the overview route, `full` for the dedicated /live grid. Props only —
@@ -68,7 +63,13 @@ export function ActiveStreamCard({ session, variant }: ActiveStreamCardProps) {
             className={isCompact ? "h-12 w-9 shrink-0" : "h-24 w-16 shrink-0"}
           />
           <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <span className="truncate font-medium text-foreground">{session.itemName}</span>
+            <Link
+              to="/items/$itemId"
+              params={{ itemId: session.itemId }}
+              className="truncate font-medium text-foreground hover:underline focus-visible:underline"
+            >
+              {session.itemName}
+            </Link>
             <span className="truncate text-xs text-muted-foreground">
               {session.userName} · {session.deviceName}
             </span>

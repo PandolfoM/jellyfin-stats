@@ -2,6 +2,7 @@ import { createRoute, createRouter, type RouterHistory } from "@tanstack/react-r
 
 import { rootRoute } from "./routes/__root";
 import { historyRoute } from "./routes/history";
+import { itemDetailRoute } from "./routes/items.$itemId";
 import { indexRoute } from "./routes/index";
 import { librariesRoute } from "./routes/libraries";
 import { libraryDetailRoute } from "./routes/libraries.$libraryId";
@@ -21,6 +22,7 @@ const routeTree = rootRoute.addChildren([
   indexRoute,
   liveRoute,
   historyRoute,
+  itemDetailRoute,
   usersRoute,
   userDetailRoute,
   librariesRoute,
@@ -67,6 +69,7 @@ export type AppRoutePath =
   | typeof indexRoute.fullPath
   | typeof liveRoute.fullPath
   | typeof historyRoute.fullPath
+  | typeof itemDetailRoute.fullPath
   | typeof usersRoute.fullPath
   | typeof userDetailRoute.fullPath
   | typeof librariesRoute.fullPath
